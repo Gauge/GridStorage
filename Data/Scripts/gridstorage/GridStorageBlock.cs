@@ -36,7 +36,7 @@ namespace GridStorage
 
 		// used when selecting from spectator mode
 		private bool GridSelectionMode = true;
-		bool GridSelectionIsValid = true;
+		string GridSelectErrorMessage = null;
 		private IMyCubeGrid SelectedGridEntity = null;
 		private float PlacementDistance = 200;
 		private IMyCameraController CameraController = null;
@@ -112,6 +112,11 @@ namespace GridStorage
 			if (SelectedGridEntity != null)
 			{
 				ShowHideBoundingBoxGridGroup(SelectedGridEntity, false);
+			}
+
+			if (CubeGridsToPlace != null && CubeGridsToPlace.Count > 0)
+			{
+				ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], false);
 			}
 
 			GridsToPlace = null;
@@ -355,13 +360,14 @@ namespace GridStorage
 				if (gsb.CubeGridsToPlace != null)
 				{
 					gsb.GridSelectionMode = false;
-					MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(gsb.CubeGridsToPlace[0], true, Color.LightGreen.ToVector4(), GridSelectLineSize);
+
+					ShowHideBoundingBoxGridGroup(gsb.CubeGridsToPlace[0], true, Color.LightGreen.ToVector4());
 					gsb.StartSpectatorView();
 				}
 			}
 		}
 
-		private void ShowHideBoundingBoxGridGroup(IMyCubeGrid grid, bool enabled, Vector4? color = null)
+		private static void ShowHideBoundingBoxGridGroup(IMyCubeGrid grid, bool enabled, Vector4? color = null)
 		{
 			List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical);
 			foreach (MyCubeGrid sub in subgrids)
@@ -390,46 +396,47 @@ namespace GridStorage
 
 			MyCubeGrid hitGrid = info?.HitEntity as MyCubeGrid;
 
-		if (SelectedGridEntity != null && hitGrid == null || // just stopped looking at a grid
-			SelectedGridEntity != null && hitGrid != null && SelectedGridEntity != hitGrid) // switched from one grid to another
+			if (SelectedGridEntity != null && hitGrid == null || // just stopped looking at a grid
+				SelectedGridEntity != null && hitGrid != null && SelectedGridEntity != hitGrid) // switched from one grid to another
 			{
 				ShowHideBoundingBoxGridGroup(SelectedGridEntity, false);
 
 				SelectedGridEntity = null;
 			}
 
-		if (hitGrid != null)
+			if (hitGrid != null)
 			{
 				if (SelectedGridEntity != hitGrid)
 				{
 					SelectedGridEntity = hitGrid;
-					GridSelectionIsValid = true;
+					GridSelectErrorMessage = null;
 					List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(hitGrid, GridLinkTypeEnum.Mechanical);
 
 					foreach (MyCubeGrid grid in subgrids)
 					{
+						bool isValid = true;
 						if (grid.EntityId == Grid.EntityId)
 						{
-							DisplayNotification($"Cannot store parent grid", 1, "Red");
-							GridSelectionIsValid = false;
+							GridSelectErrorMessage = $"Cannot store parent grid";
+							isValid = false;
 						}
 						else if (grid.IsStatic)
 						{
-							DisplayNotification($"Cannot store static grids", 1, "Red");
-							GridSelectionIsValid = false;
+							GridSelectErrorMessage = $"Cannot store static grids";
+							isValid = false;
 						}
 						else if (grid.BigOwners.Count == 0)
 						{
-							DisplayNotification($"Cannot store unowned grid", 1, "Red");
-							GridSelectionIsValid = false;
+							GridSelectErrorMessage = $"Cannot store unowned grid";
+							isValid = false;
 						}
 						else if (GridHasNonFactionOwners(grid))
 						{
-							DisplayNotification($"Some blocks owned by other factions", 1, "Red");
-							GridSelectionIsValid = false;
+							GridSelectErrorMessage = $"Some blocks owned by other factions";
+							isValid = false;
 						}
 
-						if (!GridSelectionIsValid)
+						if (!isValid)
 						{
 							MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(grid, true, Color.Red.ToVector4(), GridSelectLineSize);
 						}
@@ -438,9 +445,14 @@ namespace GridStorage
 							MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(grid, true, Color.Green.ToVector4(), GridSelectLineSize);
 						}
 					}
-				}			
+				}
 
-				if (GridSelectionIsValid && buttons.Contains(MyMouseButtonsEnum.Left))
+				if (GridSelectErrorMessage != null)
+				{
+					DisplayNotification(GridSelectErrorMessage, 1, "Red");
+
+				}
+				else if (buttons.Contains(MyMouseButtonsEnum.Left))
 				{
 					EndSpectatorView();
 					return;
@@ -450,7 +462,7 @@ namespace GridStorage
 
 		private void GridPlacement()
 		{
-			PlacementDistance += ((float)MyAPIGateway.Input.DeltaMouseScrollWheelValue()/4f);
+			PlacementDistance += ((float)MyAPIGateway.Input.DeltaMouseScrollWheelValue() / 4f);
 
 			if (PlacementDistance < 0)
 			{
