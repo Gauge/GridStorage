@@ -22,7 +22,7 @@ namespace GridStorage
 	[MyEntityComponentDescriptor(typeof(MyObjectBuilder_UpgradeModule), true, "GridStorageBlock")]
 	public class GridStorageBlock : MyGameLogicComponent
 	{
-		public const float GridStorageDistance = 2000; // meters
+		public const float GridSelectLineSize = 0.2f;
 
 		private static readonly Guid StorageGuid = new Guid("B7AF750E-0077-4826-BD0E-EE5BF36BA3E5");
 
@@ -36,6 +36,7 @@ namespace GridStorage
 
 		// used when selecting from spectator mode
 		private bool GridSelectionMode = true;
+		bool GridSelectionIsValid = true;
 		private IMyCubeGrid SelectedGridEntity = null;
 		private float PlacementDistance = 200;
 		private IMyCameraController CameraController = null;
@@ -78,19 +79,7 @@ namespace GridStorage
 				PlacePrefab();
 			}
 
-			if (MyAPIGateway.Session.ControlledObject?.Entity is IMyTerminalBlock)
-			{
-				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.ControlledObject.Entity);
-			}
-			else
-			{
-				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.LocalHumanPlayer.Character);
-			}
-
-			GridsToPlace = null;
-			SelectedGridEntity = null;
-			CubeGridsToPlace = null;
-			NeedsUpdate = MyEntityUpdateEnum.NONE;
+			ResetView();
 		}
 
 		private void CancelSpectorView()
@@ -106,6 +95,11 @@ namespace GridStorage
 				}
 			}
 
+			ResetView();
+		}
+
+		private void ResetView()
+		{
 			if (MyAPIGateway.Session.ControlledObject?.Entity is IMyTerminalBlock)
 			{
 				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.ControlledObject.Entity);
@@ -113,6 +107,11 @@ namespace GridStorage
 			else
 			{
 				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.LocalHumanPlayer.Character);
+			}
+
+			if (SelectedGridEntity != null)
+			{
+				ShowHideBoundingBoxGridGroup(SelectedGridEntity, false);
 			}
 
 			GridsToPlace = null;
@@ -133,7 +132,7 @@ namespace GridStorage
 				EndSpectatorView();
 			}
 
-			DisplayNotification($"orbit: {(Grid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation).Length().ToString("n0")}", 1, "White");
+			DisplayNotification($"Select (LMB) - Cancel (RMB) - Camera Orbit ({gridToCamera.Length().ToString("n0")}/1000) - Range (500)", 1, "White");
 
 			if (CameraController != MyAPIGateway.Session.CameraController)
 			{
@@ -356,9 +355,18 @@ namespace GridStorage
 				if (gsb.CubeGridsToPlace != null)
 				{
 					gsb.GridSelectionMode = false;
-					MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(gsb.CubeGridsToPlace[0], true, Color.LightGreen.ToVector4());
+					MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(gsb.CubeGridsToPlace[0], true, Color.LightGreen.ToVector4(), GridSelectLineSize);
 					gsb.StartSpectatorView();
 				}
+			}
+		}
+
+		private void ShowHideBoundingBoxGridGroup(IMyCubeGrid grid, bool enabled, Vector4? color = null)
+		{
+			List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical);
+			foreach (MyCubeGrid sub in subgrids)
+			{
+				MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(sub, enabled, color, GridSelectLineSize);
 			}
 		}
 
@@ -374,29 +382,66 @@ namespace GridStorage
 			}
 
 			MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
-
-			// show highlighted grid
 			Vector3D start = matrix.Translation;
 			Vector3D end = start + (matrix.Forward * 500);
 
 			IHitInfo info;
 			MyAPIGateway.Physics.CastRay(start, end, out info);
 
-			IMyCubeGrid grid = info?.HitEntity as IMyCubeGrid;
+			MyCubeGrid hitGrid = info?.HitEntity as MyCubeGrid;
 
-			if (grid != null)
+		if (SelectedGridEntity != null && hitGrid == null || // just stopped looking at a grid
+			SelectedGridEntity != null && hitGrid != null && SelectedGridEntity != hitGrid) // switched from one grid to another
 			{
-				DisplayNotification($"target: \"{grid.DisplayName}\" distance: {(start - info.Position).Length().ToString("n0")}", 1, "White");
+				ShowHideBoundingBoxGridGroup(SelectedGridEntity, false);
 
-				MatrixD world = grid.WorldMatrix;
-				BoundingBoxD box = grid.LocalAABB;
-				Color color = Color.LightGreen;
+				SelectedGridEntity = null;
+			}
 
-				MySimpleObjectDraw.DrawTransparentBox(ref world, ref box, ref color, MySimpleObjectRasterizer.Solid, 5);
-
-				if (buttons.Contains(MyMouseButtonsEnum.Left))
+		if (hitGrid != null)
+			{
+				if (SelectedGridEntity != hitGrid)
 				{
-					SelectedGridEntity = grid;
+					SelectedGridEntity = hitGrid;
+					GridSelectionIsValid = true;
+					List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(hitGrid, GridLinkTypeEnum.Mechanical);
+
+					foreach (MyCubeGrid grid in subgrids)
+					{
+						if (grid.EntityId == Grid.EntityId)
+						{
+							DisplayNotification($"Cannot store parent grid", 1, "Red");
+							GridSelectionIsValid = false;
+						}
+						else if (grid.IsStatic)
+						{
+							DisplayNotification($"Cannot store static grids", 1, "Red");
+							GridSelectionIsValid = false;
+						}
+						else if (grid.BigOwners.Count == 0)
+						{
+							DisplayNotification($"Cannot store unowned grid", 1, "Red");
+							GridSelectionIsValid = false;
+						}
+						else if (GridHasNonFactionOwners(grid))
+						{
+							DisplayNotification($"Some blocks owned by other factions", 1, "Red");
+							GridSelectionIsValid = false;
+						}
+
+						if (!GridSelectionIsValid)
+						{
+							MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(grid, true, Color.Red.ToVector4(), GridSelectLineSize);
+						}
+						else
+						{
+							MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(grid, true, Color.Green.ToVector4(), GridSelectLineSize);
+						}
+					}
+				}			
+
+				if (GridSelectionIsValid && buttons.Contains(MyMouseButtonsEnum.Left))
+				{
 					EndSpectatorView();
 					return;
 				}
@@ -443,6 +488,20 @@ namespace GridStorage
 				EndSpectatorView();
 				return;
 			}
+		}
+
+		public static bool GridHasNonFactionOwners(IMyCubeGrid grid)
+		{
+			var gridOwners = grid.BigOwners;
+			foreach (var pid in gridOwners)
+			{
+				MyRelationsBetweenPlayerAndBlock relation = MyAPIGateway.Session.Player.GetRelationTo(pid);
+				if (relation == MyRelationsBetweenPlayerAndBlock.Enemies || relation == MyRelationsBetweenPlayerAndBlock.Neutral)
+				{
+					return true;
+				}
+			}
+			return false;
 		}
 
 		#region create controls
