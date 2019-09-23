@@ -15,7 +15,6 @@ using VRage.Input;
 using System.IO;
 using VRage;
 using VRage.Game.Entity;
-using Sandbox.Game.World;
 using VRage.Game.ModAPI.Interfaces;
 
 namespace GridStorage
@@ -39,9 +38,11 @@ namespace GridStorage
 		private bool GridSelectionMode = true;
 		private IMyCubeGrid SelectedGridEntity = null;
 		private float PlacementDistance = 200;
+		private IMyCameraController CameraController = null;
 
 		// used when placing grids
 		private List<MyObjectBuilder_CubeGrid> GridsToPlace = null;
+		private List<MyCubeGrid> CubeGridsToPlace = null;
 
 		public override void Init(MyObjectBuilder_EntityBase objectBuilder)
 		{
@@ -61,21 +62,13 @@ namespace GridStorage
 			Vector3D position = blockPosition + (matrix.Backward * 10) + (matrix.Up * 10);
 
 			MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Spectator, null, position);
-
-			((MySession)MyAPIGateway.Session).CameraAttachedToChanged += ViewChange;
+			CameraController = MyAPIGateway.Session.CameraController;
 
 			NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME;
 		}
 
-		private void ViewChange(IMyCameraController old, IMyCameraController current)
-		{
-			CancelSpectorView();
-		}
-
 		private void EndSpectatorView()
 		{
-			((MySession)MyAPIGateway.Session).CameraAttachedToChanged -= ViewChange;
-
 			if (GridSelectionMode)
 			{
 				SavePrefab();
@@ -85,27 +78,46 @@ namespace GridStorage
 				PlacePrefab();
 			}
 
-			MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.LocalHumanPlayer.Character);
+			if (MyAPIGateway.Session.ControlledObject?.Entity is IMyTerminalBlock)
+			{
+				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.ControlledObject.Entity);
+			}
+			else
+			{
+				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.LocalHumanPlayer.Character);
+			}
+
 			GridsToPlace = null;
 			SelectedGridEntity = null;
+			CubeGridsToPlace = null;
 			NeedsUpdate = MyEntityUpdateEnum.NONE;
 		}
 
 		private void CancelSpectorView()
 		{
-			((MySession)MyAPIGateway.Session).CameraAttachedToChanged -= ViewChange;
+			if (!GridSelectionMode)
+			{
+				if (CubeGridsToPlace != null)
+				{
+					foreach (var grid in CubeGridsToPlace)
+					{
+						MyAPIGateway.Entities.MarkForClose(grid);
+					}
+				}
+			}
 
-			//if (!GridSelectionMode)
-			//{
-			//	if (SelectedGridEntity != null)
-			//	{
-			//		MyAPIGateway.Entities.MarkForClose(SelectedGridEntity);
-			//	}
-			//}
+			if (MyAPIGateway.Session.ControlledObject?.Entity is IMyTerminalBlock)
+			{
+				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.ControlledObject.Entity);
+			}
+			else
+			{
+				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.LocalHumanPlayer.Character);
+			}
 
-			MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Entity, MyAPIGateway.Session.LocalHumanPlayer.Character);
 			GridsToPlace = null;
 			SelectedGridEntity = null;
+			CubeGridsToPlace = null;
 			NeedsUpdate = MyEntityUpdateEnum.NONE;
 		}
 
@@ -114,15 +126,6 @@ namespace GridStorage
 		/// </summary>
 		public override void UpdateBeforeSimulation()
 		{
-			if (GridSelectionMode)
-			{
-				GridSelect();
-			}
-			else
-			{
-				GridPlacement();
-			}
-
 			// bind camera to a 1000m sphere
 			Vector3D gridToCamera = (Grid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
 			if (gridToCamera.LengthSquared() > 1000000)
@@ -131,6 +134,21 @@ namespace GridStorage
 			}
 
 			DisplayNotification($"orbit: {(Grid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation).Length().ToString("n0")}", 1, "White");
+
+			if (CameraController != MyAPIGateway.Session.CameraController)
+			{
+				CancelSpectorView();
+				return;
+			}
+
+			if (GridSelectionMode)
+			{
+				GridSelect();
+			}
+			else
+			{
+				GridPlacement();
+			}
 		}
 
 		private void SavePrefab()
@@ -236,9 +254,12 @@ namespace GridStorage
 
 		private void PlacePrefab()
 		{
-			if (SelectedGridEntity != null)
+			if (CubeGridsToPlace != null)
 			{
-				MyAPIGateway.Entities.MarkForClose(SelectedGridEntity);
+				foreach (var grid in CubeGridsToPlace)
+				{
+					MyAPIGateway.Entities.MarkForClose(grid);
+				}
 			}
 
 			MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
@@ -247,13 +268,14 @@ namespace GridStorage
 			CreatePhysicalGrid(GridsToPlace, matrix);
 		}
 
-		private IMyCubeGrid CreateGridProjection(List<MyObjectBuilder_CubeGrid> grids)
+		private List<MyCubeGrid> CreateGridProjection(List<MyObjectBuilder_CubeGrid> grids)
 		{
 			if (grids == null || grids.Count == 0)
 			{
 				return null;
 			}
 
+			MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
 			foreach (MyObjectBuilder_CubeGrid grid in grids)
 			{
 				grid.AngularVelocity = new SerializableVector3();
@@ -264,36 +286,18 @@ namespace GridStorage
 				grid.IsStatic = false;
 				grid.CreatePhysics = false;
 				grid.IsRespawnGrid = false;
-
-				if (MyAPIGateway.Entities.GetEntityById(grid.EntityId) != null)
-				{
-					grid.EntityId = 0;
-				}
-
-				foreach (MyObjectBuilder_CubeBlock block in grid.CubeBlocks)
-				{
-					if (MyAPIGateway.Entities.GetEntityById(block.EntityId) != null)
-					{
-						block.EntityId = 0;
-						block.Owner = ModBlock.OwnerId;
-					}
-				}
 			}
 
-			IMyCubeGrid returnGrid = null;
+			List<MyCubeGrid> cubeGrids = new List<MyCubeGrid>();
 			foreach (MyObjectBuilder_CubeGrid grid in grids)
 			{
-				MyEntity ent = (MyEntity)MyAPIGateway.Entities.CreateFromObjectBuilder(grid);
-				ent.IsPreview = true;
-				ent.Flags &= ~EntityFlags.Save;
-				ent.Render.Visible = true;
-				MyAPIGateway.Entities.AddEntity(ent);
+				MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
+				childGrid.IsPreview = true;
 
-				if (returnGrid == null)
-					returnGrid = (IMyCubeGrid)ent;
+				cubeGrids.Add(childGrid);
 			}
 
-			return returnGrid;
+			return cubeGrids;
 
 		}
 
@@ -304,6 +308,7 @@ namespace GridStorage
 				return;
 			}
 
+			MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
 			foreach (MyObjectBuilder_CubeGrid grid in grids)
 			{
 				grid.AngularVelocity = new SerializableVector3();
@@ -314,54 +319,46 @@ namespace GridStorage
 				grid.IsStatic = false;
 				grid.CreatePhysics = true;
 				grid.IsRespawnGrid = false;
-
-				if (MyAPIGateway.Entities.GetEntityById(grid.EntityId) != null)
-				{
-					grid.EntityId = 0;
-				}
-
-				foreach (MyObjectBuilder_CubeBlock block in grid.CubeBlocks)
-				{
-					if (MyAPIGateway.Entities.GetEntityById(block.EntityId) != null)
-					{
-						block.EntityId = 0;
-						block.Owner = ModBlock.OwnerId;
-					}
-				}
 			}
 
-			IMyCubeGrid returnGrid = null;
+			Vector3D parentPosition = grids[0].PositionAndOrientation.Value.Position;
+
 			foreach (MyObjectBuilder_CubeGrid grid in grids)
 			{
-				MyEntity ent = (MyEntity)MyAPIGateway.Entities.CreateFromObjectBuilder(grid);
-				ent.Flags &= ~EntityFlags.Save;
-				ent.Render.Visible = true;
-				MyAPIGateway.Entities.AddEntity(ent);
+				Vector3D offset = parentPosition - grid.PositionAndOrientation.Value.Position;
+				grid.PositionAndOrientation = new MyPositionAndOrientation((position.Translation - offset), grid.PositionAndOrientation.Value.Forward, grid.PositionAndOrientation.Value.Up);
 
-				if (returnGrid == null)
-					returnGrid = (IMyCubeGrid)ent;
+
+				MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
+				childGrid.Render.Visible = true;
+
 			}
-
-			returnGrid.Teleport(position);
 		}
 
 		private void StoreSelectedGridAction(IMyTerminalBlock block)
 		{
-			GridSelectionMode = true;
-			StartSpectatorView();
+			GridStorageBlock gsb = block.GameLogic.GetAs<GridStorageBlock>();
+			if (gsb != null)
+			{
+				gsb.GridSelectionMode = true;
+				gsb.StartSpectatorView();
+			}
 		}
 
 		private void SpawnSelectedGridAction(IMyTerminalBlock block)
 		{
-			GridsToPlace = LoadPrefab();
-			SelectedGridEntity = CreateGridProjection(GridsToPlace);
-
-
-			if (SelectedGridEntity != null)
+			GridStorageBlock gsb = block.GameLogic.GetAs<GridStorageBlock>();
+			if (gsb != null)
 			{
-				MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(SelectedGridEntity, true, Color.LightGreen.ToVector4());
-				GridSelectionMode = false;
-				StartSpectatorView();
+				gsb.GridsToPlace = gsb.LoadPrefab();
+				gsb.CubeGridsToPlace = gsb.CreateGridProjection(gsb.GridsToPlace);
+
+				if (gsb.CubeGridsToPlace != null)
+				{
+					gsb.GridSelectionMode = false;
+					MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(gsb.CubeGridsToPlace[0], true, Color.LightGreen.ToVector4());
+					gsb.StartSpectatorView();
+				}
 			}
 		}
 
@@ -419,10 +416,18 @@ namespace GridStorage
 				PlacementDistance = 500;
 			}
 
-			MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
-			matrix.Translation += (matrix.Forward * PlacementDistance);
+			MatrixD parentMatrix = CubeGridsToPlace[0].WorldMatrix;
 
-			SelectedGridEntity.Teleport(matrix);
+			foreach (MyCubeGrid grid in CubeGridsToPlace)
+			{
+				Vector3D offset = parentMatrix.Translation - grid.WorldMatrix.Translation;
+
+				MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
+				matrix.Translation -= offset;
+				matrix.Translation += (matrix.Forward * PlacementDistance);
+
+				grid.Teleport(matrix);
+			}
 
 			List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
 			MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
