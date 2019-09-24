@@ -129,6 +129,12 @@ namespace GridStorage
 		/// </summary>
 		public override void UpdateBeforeSimulation()
 		{
+			// keep users from placing blocks in spectator
+			if (MyCubeBuilder.Static.BlockCreationIsActivated)
+			{
+				MyCubeBuilder.Static.DeactivateBlockCreation();
+			}
+
 			// bind camera to a 1000m sphere
 			Vector3D gridToCamera = (Grid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
 			if (gridToCamera.LengthSquared() > 1000000)
