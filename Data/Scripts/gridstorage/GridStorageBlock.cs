@@ -14,7 +14,6 @@ using VRageMath;
 using VRage.Input;
 using System.IO;
 using VRage;
-using VRage.Game.Entity;
 using VRage.Game.ModAPI.Interfaces;
 
 namespace GridStorage
@@ -134,7 +133,7 @@ namespace GridStorage
 			Vector3D gridToCamera = (Grid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
 			if (gridToCamera.LengthSquared() > 1000000)
 			{
-				EndSpectatorView();
+				CancelSpectorView();
 			}
 
 			DisplayNotification($"Select (LMB) - Cancel (RMB) - Camera Orbit ({gridToCamera.Length().ToString("n0")}/1000) - Range (500)", 1, "White");
@@ -270,6 +269,13 @@ namespace GridStorage
 			matrix.Translation += (matrix.Forward * PlacementDistance);
 
 			CreatePhysicalGrid(GridsToPlace, matrix);
+
+			StoredGrids.Remove(SelectedGrid);
+			if (StoredGrids.Count > 0)
+			{
+				SelectedGrid = StoredGrids[0];
+			}
+
 		}
 
 		private List<MyCubeGrid> CreateGridProjection(List<MyObjectBuilder_CubeGrid> grids)
@@ -360,8 +366,6 @@ namespace GridStorage
 				if (gsb.CubeGridsToPlace != null)
 				{
 					gsb.GridSelectionMode = false;
-
-					ShowHideBoundingBoxGridGroup(gsb.CubeGridsToPlace[0], true, Color.LightGreen.ToVector4());
 					gsb.StartSpectatorView();
 				}
 			}
@@ -485,8 +489,48 @@ namespace GridStorage
 
 				grid.Teleport(matrix);
 			}
+			
+			bool isValid = true;
 
-			List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
+			BoundingBoxD box = CubeGridsToPlace[0].GetPhysicalGroupAABB();
+			List <IMyEntity> entities = MyAPIGateway.Entities.GetEntitiesInAABB(ref box);
+			entities.RemoveAll((e) => !(e is MyVoxelBase || (e is IMyCubeBlock && !CubeGridsToPlace.Contains((MyCubeGrid)(e as IMyCubeBlock).CubeGrid)) || e is IMyCharacter || e is IMyFloatingObject));
+
+			foreach (IMyEntity ent in entities)
+			{
+				if (!isValid)
+					break;
+
+				if (ent is MyVoxelBase)
+				{
+					foreach (MyCubeGrid grid in CubeGridsToPlace)
+					{
+						MyTuple<float, float> voxelcheck = (ent as MyVoxelBase).GetVoxelContentInBoundingBox_Fast(grid.PositionComp.LocalAABB, grid.WorldMatrix);
+						if (!float.IsNaN(voxelcheck.Item2) && voxelcheck.Item2 > 0.1f)
+						{
+							DisplayNotification($"Voxel Obstruction {(voxelcheck.Item2*100).ToString("n2")}%", 1, "Red");
+							isValid = false;
+							break;
+						}
+					}
+				}
+				else
+				{
+					DisplayNotification($"Obstruction {ent.GetType().Name} {ent.DisplayName}", 1, "Red");
+					isValid = false;
+				}
+			}
+
+			if (isValid)
+			{
+				ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], true, Color.LightGreen.ToVector4());
+			}
+			else
+			{
+				ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], true, Color.Red.ToVector4());
+			}
+
+			List <MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
 			MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
 
 			if (buttons.Contains(MyMouseButtonsEnum.Right))
@@ -495,7 +539,7 @@ namespace GridStorage
 				return;
 			}
 
-			if (buttons.Contains(MyMouseButtonsEnum.Left))
+			if (isValid && buttons.Contains(MyMouseButtonsEnum.Left))
 			{
 				EndSpectatorView();
 				return;
@@ -532,7 +576,7 @@ namespace GridStorage
 
 			Tools.CreateControlButton("GridStorage_Store", "Store Grid", "Lets you select a grid to store", ControlsVisible_Basic, ControlsEnabled_Basic, StoreSelectedGridAction);
 
-			Tools.CreateControlListbox("BlinkDrive_GPSList", "GPS Locations", "Select a location for ranged jumps", 8, ControlsVisible_Basic, ControlsEnabled_Basic,
+			Tools.CreateControlListbox("GridStorage_GridList", "Grid List", "Select a grid to spawn", 8, ControlsVisible_Basic, ControlsEnabled_Basic,
 			(block, items, selected) => {
 				List<IMyGps> list = new List<IMyGps>();
 				MyAPIGateway.Session.GPS.GetGpsList(MyAPIGateway.Session.LocalHumanPlayer.IdentityId, list);
