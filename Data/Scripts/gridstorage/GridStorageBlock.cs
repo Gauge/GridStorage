@@ -15,6 +15,8 @@ using VRage.Input;
 using System.IO;
 using VRage;
 using VRage.Game.ModAPI.Interfaces;
+//using Sandbox.Game;
+//using VRage.Game.Entity.UseObject;
 
 namespace GridStorage
 {
@@ -464,8 +466,9 @@ namespace GridStorage
 				}
 				else if (buttons.Contains(MyMouseButtonsEnum.Left))
 				{
-					EndSpectatorView();
-					return;
+					SavePrefab();
+					//EndSpectatorView();
+					
 				}
 			}
 		}
@@ -671,3 +674,53 @@ namespace GridStorage
 		}
 	}
 }
+
+//try
+//{
+//	List<IMySlimBlock> blocks = new List<IMySlimBlock>();
+//	//(CubeBlock.CubeGrid as IMyCubeGrid).GetBlocks(blocks, (b) => b.FatBlock != null && b.FatBlock is IMyGyro);
+//	//MyUseObjectsComponentBase usecomp = blocks[0].FatBlock.Components.Get<MyUseObjectsComponentBase>();
+//	MyUseObjectsComponentBase usecomp = CubeBlock.Components.Get<MyUseObjectsComponentBase>();
+
+//	//usecomp.RemoveDetector(0);
+//	usecomp.AddDetector("detector_terminal_001", MyAPIGateway.Session.Player.Character.WorldMatrix);
+
+//	for (uint i = 0; i < 5; i++)
+//	{
+//		var thing2 = usecomp.GetInteractiveObject(i);
+//		if (thing2 != null)
+//		{
+//			MyLog.Default.Info($"{i} - {thing2.PrimaryAction} {thing2.SecondaryAction} {thing2.SupportedActions}");
+//		}
+//	}
+
+//	var thing = usecomp.GetInteractiveObject(0);
+
+//	//usecomp.AddDetector("detector_terminal_001", MyAPIGateway.Session.Player.Character.WorldMatrix);
+
+//	if (thing == null)
+//	{
+//		DisplayNotification("null", 1, "White");
+//		//MyLog.Default.Info($"null");
+//	}
+//	else
+//	{
+//		thing.Use(UseActionEnum.OpenTerminal, MyAPIGateway.Session.Player.Character);
+
+//		DisplayNotification($"{thing.PrimaryAction} {thing.ContinuousUsage} {thing.InstanceID}", 1, "White");
+//		//MyLog.Default.Info($"{thing.PrimaryAction} {thing.ContinuousUsage} {thing.InstanceID}");
+//	}
+
+//	//for (uint i = 0; i < 5; i++)
+//	//{
+//	//	var thing = usecomp.GetInteractiveObject(i);
+//	//	if (thing != null)
+//	//	{
+//	//		MyLog.Default.Info($"{i} - {thing.PrimaryAction} {thing.ContinuousUsage} {thing.InstanceID}");
+//	//	}
+//	//}
+//}
+//catch (Exception e)
+//{
+//	MyLog.Default.Info(e.ToString());
+//}
