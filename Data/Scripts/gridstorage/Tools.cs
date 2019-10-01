@@ -1,5 +1,4 @@
-﻿using Sandbox.Game.Entities;
-using Sandbox.ModAPI;
+﻿using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces.Terminal;
 using System;
 using System.Collections.Generic;

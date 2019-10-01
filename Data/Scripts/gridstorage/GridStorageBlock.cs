@@ -2,38 +2,41 @@
 using Sandbox.Game.Entities;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
+using SENetworkAPI;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using VRage;
 using VRage.Game;
 using VRage.Game.Components;
 using VRage.Game.ModAPI;
+using VRage.Game.ModAPI.Interfaces;
+using VRage.Input;
 using VRage.ModAPI;
 using VRage.ObjectBuilders;
 using VRage.Utils;
 using VRageMath;
-using VRage.Input;
-using System.IO;
-using VRage;
-using VRage.Game.ModAPI.Interfaces;
-//using Sandbox.Game;
-//using VRage.Game.Entity.UseObject;
 
 namespace GridStorage
 {
+
 	[MyEntityComponentDescriptor(typeof(MyObjectBuilder_UpgradeModule), true, "GridStorageBlock")]
-	public class GridStorageBlock : MyGameLogicComponent
+	public class GridStorageBlock : MyNetworkAPIGameLogicComponent
 	{
 		public const float GridSelectLineSize = 0.2f;
 
-		private static readonly Guid StorageGuid = new Guid("B7AF750E-0077-4826-BD0E-EE5BF36BA3E5");
+		private static readonly Guid StorageGuid = new Guid("19906e82-9e21-458d-8f02-7bf7030ed604");
 
 		public IMyCubeGrid Grid;
 		public IMyTerminalBlock ModBlock;
 		public MyCubeBlock CubeBlock;
 
 		// used in terminal menu
-		private List<string> StoredGrids = new List<string>();
+		private NetSync<string> GridFilenames;
+		private List<string> GridFilenamesList = new List<string>();
 		private string SelectedGrid = null;
+
+		//private NetSync<string> GridRequest;
 
 		// used when selecting from spectator mode
 		private bool GridSelectionMode = true;
@@ -46,18 +49,48 @@ namespace GridStorage
 		private List<MyObjectBuilder_CubeGrid> GridsToPlace = null;
 		private List<MyCubeGrid> CubeGridsToPlace = null;
 
+		public override bool IsSerialized()
+		{
+			Save();
+			return base.IsSerialized();
+		}
+
 		public override void Init(MyObjectBuilder_EntityBase objectBuilder)
 		{
+			base.Init(objectBuilder);
+
+			if (MyAPIGateway.Session.IsServer)
+			{
+				Load();
+			}
 
 			ModBlock = Entity as IMyTerminalBlock;
 			Grid = ModBlock.CubeGrid;
 			CubeBlock = (MyCubeBlock)ModBlock;
 
+			GridFilenames = new NetSync<string>(this, TransferType.Both, "", true);
+			GridFilenames.ValueChanged += GridListChanged;
+
+			//GridRequest = new NetSync<string>(this, TransferType.ClientToServer, "");
+
 			NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+		}
+
+		public override void OnAddedToScene()
+		{
+			base.OnAddedToScene();
+		}
+
+		public void GridListChanged(string oldval, string newval)
+		{
+			MyLog.Default.Info($"[Grid Storage] replacing \"{oldval}\" with \"{newval}\"");
+			GridFilenamesList.Clear();
+			GridFilenamesList.AddRange(newval.Split(new string[] { "?/#/#?" }, StringSplitOptions.RemoveEmptyEntries));
 		}
 
 		private void StartSpectatorView()
 		{
+			//GridRequest.Value = "Start Spectator";
 			Vector3D blockPosition = Entity.GetPosition();
 			MatrixD matrix = Entity.WorldMatrix;
 
@@ -71,6 +104,7 @@ namespace GridStorage
 
 		private void EndSpectatorView()
 		{
+			//GridRequest.Value = "End Spectator";
 			if (GridSelectionMode)
 			{
 				SavePrefab();
@@ -85,6 +119,7 @@ namespace GridStorage
 
 		private void CancelSpectorView()
 		{
+			//GridRequest.Value = "Cancel Spectator";
 			if (!GridSelectionMode)
 			{
 				if (CubeGridsToPlace != null)
@@ -195,9 +230,10 @@ namespace GridStorage
 					index++;
 					prefabName = $"{baseName}{((index > 1) ? $"_{index}" : "")}";
 				}
-				while (StoredGrids.Contains(prefabName));
+				while (GridFilenamesList.Contains(prefabName));
 
-				StoredGrids.Add(prefabName);
+				GridFilenamesList.Add(prefabName);
+				GridFilenames.Value = string.Join("?/#/#?", GridFilenamesList.ToArray());
 				SelectedGrid = prefabName;
 
 				MyLog.Default.Info($"[Grid Storage] Attempting to save \"{prefabName}\"");
@@ -278,10 +314,10 @@ namespace GridStorage
 
 			CreatePhysicalGrid(GridsToPlace, matrix);
 
-			StoredGrids.Remove(SelectedGrid);
-			if (StoredGrids.Count > 0)
+			GridFilenamesList.Remove(SelectedGrid);
+			if (GridFilenamesList.Count > 0)
 			{
-				SelectedGrid = StoredGrids[0];
+				SelectedGrid = GridFilenamesList[0];
 			}
 
 		}
@@ -467,8 +503,6 @@ namespace GridStorage
 				else if (buttons.Contains(MyMouseButtonsEnum.Left))
 				{
 					SavePrefab();
-					//EndSpectatorView();
-					
 				}
 			}
 		}
@@ -498,11 +532,11 @@ namespace GridStorage
 
 				grid.Teleport(matrix);
 			}
-			
+
 			bool isValid = true;
 
 			BoundingBoxD box = CubeGridsToPlace[0].GetPhysicalGroupAABB();
-			List <IMyEntity> entities = MyAPIGateway.Entities.GetEntitiesInAABB(ref box);
+			List<IMyEntity> entities = MyAPIGateway.Entities.GetEntitiesInAABB(ref box);
 			entities.RemoveAll((e) => !(e is MyVoxelBase || (e is IMyCubeBlock && !CubeGridsToPlace.Contains((MyCubeGrid)(e as IMyCubeBlock).CubeGrid)) || e is IMyCharacter || e is IMyFloatingObject));
 
 			foreach (IMyEntity ent in entities)
@@ -517,7 +551,7 @@ namespace GridStorage
 						MyTuple<float, float> voxelcheck = (ent as MyVoxelBase).GetVoxelContentInBoundingBox_Fast(grid.PositionComp.LocalAABB, grid.WorldMatrix);
 						if (!float.IsNaN(voxelcheck.Item2) && voxelcheck.Item2 > 0.1f)
 						{
-							DisplayNotification($"Voxel Obstruction {(voxelcheck.Item2*100).ToString("n2")}%", 1, "Red");
+							DisplayNotification($"Voxel Obstruction {(voxelcheck.Item2 * 100).ToString("n2")}%", 1, "Red");
 							isValid = false;
 							break;
 						}
@@ -539,7 +573,7 @@ namespace GridStorage
 				ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], true, Color.Red.ToVector4());
 			}
 
-			List <MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
+			List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
 			MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
 
 			if (buttons.Contains(MyMouseButtonsEnum.Right))
@@ -587,12 +621,9 @@ namespace GridStorage
 
 			Tools.CreateControlListbox("GridStorage_GridList", "Grid List", "Select a grid to spawn", 8, ControlsVisible_Basic, ControlsEnabled_Basic,
 			(block, items, selected) => {
-				List<IMyGps> list = new List<IMyGps>();
-				MyAPIGateway.Session.GPS.GetGpsList(MyAPIGateway.Session.LocalHumanPlayer.IdentityId, list);
-
 				GridStorageBlock drive = block.GameLogic?.GetAs<GridStorageBlock>();
 
-				foreach (string filename in drive.StoredGrids)
+				foreach (string filename in drive.GridFilenamesList)
 				{
 					MyTerminalControlListBoxItem listItem = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(filename), MyStringId.GetOrCompute(""), filename);
 					items.Add(listItem);
@@ -626,18 +657,25 @@ namespace GridStorage
 
 		#endregion
 
+		public static MyModStorageComponentBase GetStorage(IMyEntity entity)
+		{
+			return entity.Storage ?? (entity.Storage = new MyModStorageComponent());
+		}
+
+
 		private void Save()
 		{
 			MyModStorageComponentBase storage = GetStorage(Entity);
 
 			if (storage.ContainsKey(StorageGuid))
 			{
-				storage[StorageGuid] = MyAPIGateway.Utilities.SerializeToXML(StoredGrids);
+				storage[StorageGuid] = GridFilenames.Value;
+				MyLog.Default.Info($"[Grid Storage] Data Saved");
 			}
 			else
 			{
-				MyLog.Default.Info($"[Grid Storage] {Entity.EntityId}: Saved new Data");
-				storage.Add(new KeyValuePair<Guid, string>(StorageGuid, MyAPIGateway.Utilities.SerializeToXML(StoredGrids)));
+				MyLog.Default.Info($"[Grid Storage] {Entity.EntityId}: Saved new data");
+				storage.Add(new KeyValuePair<Guid, string>(StorageGuid, GridFilenames.Value));
 			}
 		}
 
@@ -647,26 +685,22 @@ namespace GridStorage
 
 			if (storage.ContainsKey(StorageGuid))
 			{
-				StoredGrids = MyAPIGateway.Utilities.SerializeFromXML<List<string>>(storage[StorageGuid]);
+				GridFilenames.Value = storage[StorageGuid];
+				MyLog.Default.Info($"[Grid Storage] Data loaded: {GridFilenames.Value}");
 			}
 			else
 			{
-				MyLog.Default.Info($"[BlinkDrive] No data saved for:{Entity.EntityId}. Loading Defaults");
-				StoredGrids = new List<string>();
+				MyLog.Default.Info($"[Grid Storage] No data saved for: {Entity.EntityId}");
 			}
 		}
 
-		public static MyModStorageComponentBase GetStorage(IMyEntity entity)
-		{
-			return entity.Storage ?? (entity.Storage = new MyModStorageComponent());
-		}
 
 		private void DisplayNotification(string text, int lifetime, string color)
 		{
 
 			if (MyAPIGateway.Utilities.IsDedicated)
 			{
-				MyLog.Default.Info($"[BlinkDrive] {ModBlock.EntityId} msg: {text}");
+				MyLog.Default.Info($"[Grid Storage] {ModBlock.EntityId} msg: {text}");
 				return;
 			}
 
@@ -674,53 +708,3 @@ namespace GridStorage
 		}
 	}
 }
-
-//try
-//{
-//	List<IMySlimBlock> blocks = new List<IMySlimBlock>();
-//	//(CubeBlock.CubeGrid as IMyCubeGrid).GetBlocks(blocks, (b) => b.FatBlock != null && b.FatBlock is IMyGyro);
-//	//MyUseObjectsComponentBase usecomp = blocks[0].FatBlock.Components.Get<MyUseObjectsComponentBase>();
-//	MyUseObjectsComponentBase usecomp = CubeBlock.Components.Get<MyUseObjectsComponentBase>();
-
-//	//usecomp.RemoveDetector(0);
-//	usecomp.AddDetector("detector_terminal_001", MyAPIGateway.Session.Player.Character.WorldMatrix);
-
-//	for (uint i = 0; i < 5; i++)
-//	{
-//		var thing2 = usecomp.GetInteractiveObject(i);
-//		if (thing2 != null)
-//		{
-//			MyLog.Default.Info($"{i} - {thing2.PrimaryAction} {thing2.SecondaryAction} {thing2.SupportedActions}");
-//		}
-//	}
-
-//	var thing = usecomp.GetInteractiveObject(0);
-
-//	//usecomp.AddDetector("detector_terminal_001", MyAPIGateway.Session.Player.Character.WorldMatrix);
-
-//	if (thing == null)
-//	{
-//		DisplayNotification("null", 1, "White");
-//		//MyLog.Default.Info($"null");
-//	}
-//	else
-//	{
-//		thing.Use(UseActionEnum.OpenTerminal, MyAPIGateway.Session.Player.Character);
-
-//		DisplayNotification($"{thing.PrimaryAction} {thing.ContinuousUsage} {thing.InstanceID}", 1, "White");
-//		//MyLog.Default.Info($"{thing.PrimaryAction} {thing.ContinuousUsage} {thing.InstanceID}");
-//	}
-
-//	//for (uint i = 0; i < 5; i++)
-//	//{
-//	//	var thing = usecomp.GetInteractiveObject(i);
-//	//	if (thing != null)
-//	//	{
-//	//		MyLog.Default.Info($"{i} - {thing.PrimaryAction} {thing.ContinuousUsage} {thing.InstanceID}");
-//	//	}
-//	//}
-//}
-//catch (Exception e)
-//{
-//	MyLog.Default.Info(e.ToString());
-//}

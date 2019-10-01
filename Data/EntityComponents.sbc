@@ -6,7 +6,7 @@
         <SubtypeId>GridStorageBlock</SubtypeId>
       </Id>
       <RegisteredStorageGuids>
-        <guid>B7AF750E-0077-4826-BD0E-EE5BF36BA3E5</guid>
+        <guid>19906e82-9e21-458d-8f02-7bf7030ed604</guid>
       </RegisteredStorageGuids>
     </EntityComponent>
   </EntityComponents>
