@@ -36,8 +36,6 @@ namespace GridStorage
 		private List<string> GridFilenamesList = new List<string>();
 		private string SelectedGrid = null;
 
-		//private NetSync<string> GridRequest;
-
 		// used when selecting from spectator mode
 		private bool GridSelectionMode = true;
 		string GridSelectErrorMessage = null;
@@ -71,14 +69,7 @@ namespace GridStorage
 			GridFilenames = new NetSync<string>(this, TransferType.Both, "", true);
 			GridFilenames.ValueChanged += GridListChanged;
 
-			//GridRequest = new NetSync<string>(this, TransferType.ClientToServer, "");
-
 			NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
-		}
-
-		public override void OnAddedToScene()
-		{
-			base.OnAddedToScene();
 		}
 
 		public void GridListChanged(string oldval, string newval)
@@ -90,7 +81,6 @@ namespace GridStorage
 
 		private void StartSpectatorView()
 		{
-			//GridRequest.Value = "Start Spectator";
 			Vector3D blockPosition = Entity.GetPosition();
 			MatrixD matrix = Entity.WorldMatrix;
 
@@ -104,7 +94,6 @@ namespace GridStorage
 
 		private void EndSpectatorView()
 		{
-			//GridRequest.Value = "End Spectator";
 			if (GridSelectionMode)
 			{
 				SavePrefab();
@@ -119,7 +108,6 @@ namespace GridStorage
 
 		private void CancelSpectorView()
 		{
-			//GridRequest.Value = "Cancel Spectator";
 			if (!GridSelectionMode)
 			{
 				if (CubeGridsToPlace != null)
@@ -205,8 +193,10 @@ namespace GridStorage
 					return;
 
 				// create prefab from parent and subgrids
-
-				Prefab prefab = new Prefab();
+				Prefab prefab = new Prefab() {
+					StorageBlockId = Entity.EntityId,
+					Name = SelectedGridEntity.DisplayName
+				};
 				// forced into doing strings cause the dumb serializer is erroring out otherwise.
 				prefab.Grids.Add(MyAPIGateway.Utilities.SerializeToXML((MyObjectBuilder_CubeGrid)SelectedGridEntity.GetObjectBuilder()));
 
