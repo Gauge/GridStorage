@@ -70,6 +70,11 @@ namespace SENetworkAPI
 		public Action<T, T, ulong> ValueChangedByNetwork;
 
 		/// <summary>
+		/// Fires when the value is requested
+		/// </summary>
+		//public Action<ulong> ValueRequested;
+
+		/// <summary>
 		/// this property syncs across the network when changed
 		/// </summary>
 		public T Value
@@ -164,6 +169,12 @@ namespace SENetworkAPI
 		private void SendValue(SyncType syncType = SyncType.Broadcast, ulong sendTo = ulong.MinValue)
 		{
 
+			if (Value == null)
+			{
+				MyLog.Default.Error($"[NetworkAPI] ID: {Id} Type: {typeof(T)} Value is null. Cannot transmit null value.");
+				return;
+			}
+
 			if (MyAPIGateway.Multiplayer.IsServer)
 			{
 				if (syncType == SyncType.None || syncType == SyncType.Fetch)
@@ -235,7 +246,7 @@ namespace SENetworkAPI
 
 				if (pack.SyncType == SyncType.Fetch)
 				{
-					property.Push(SyncType.Fetch, sender);
+					property.Push(SyncType.Post, sender);
 				}
 				else
 				{
@@ -275,7 +286,7 @@ namespace SENetworkAPI
 		/// <summary>
 		/// Send data across the network now
 		/// </summary>
-		internal override void Push(SyncType type, ulong sendTo)
+		internal override void Push(SyncType type, ulong sendTo = ulong.MinValue)
 		{
 			SendValue(type, sendTo);
 		}

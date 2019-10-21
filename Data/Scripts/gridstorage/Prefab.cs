@@ -1,6 +1,7 @@
 ﻿using ProtoBuf;
 using Sandbox.ModAPI;
 using System.Collections.Generic;
+using VRage;
 using VRage.Game;
 
 namespace GridStorage
@@ -25,7 +26,6 @@ namespace GridStorage
 		}
 	}
 
-
 	[ProtoContract]
 	public class StoreGridData
 	{
@@ -34,5 +34,31 @@ namespace GridStorage
 
 		[ProtoMember(2)]
 		public long Target;
+	}
+
+	[ProtoContract]
+	public class PreviewGridData
+	{
+		[ProtoMember(1)]
+		public long BlockId;
+
+		[ProtoMember(2)]
+		public string GridName;
+
+		[ProtoMember(3)]
+		public Prefab Prefab;
+	}
+
+	[ProtoContract]
+	public class PlaceGridData
+	{
+		[ProtoMember(1)]
+		public long BlockId;
+
+		[ProtoMember(2)]
+		public string GridName;
+
+		[ProtoMember(3)]
+		public SerializableVector3D Position;
 	}
 }

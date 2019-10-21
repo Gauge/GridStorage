@@ -5,7 +5,7 @@ using Sandbox.ModAPI;
 using SENetworkAPI;
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Text;
 using VRage;
 using VRage.Game;
 using VRage.Game.Components;
@@ -32,53 +32,66 @@ namespace GridStorage
 		public MyCubeBlock CubeBlock;
 
 		// used in terminal menu
-		private NetSync<string> GridFilenames;
-		private List<string> GridFilenamesList = new List<string>();
-		private string SelectedGrid = null;
+		public NetSync<List<string>> GridList;
+		public string SelectedGrid = null;
+		private IMyCubeGrid SelectedGridEntity = null;
 
 		// used when selecting from spectator mode
 		private bool GridSelectionMode = true;
 		string GridSelectErrorMessage = null;
-		private IMyCubeGrid SelectedGridEntity = null;
 		private float PlacementDistance = 200;
 		private IMyCameraController CameraController = null;
 
 		// used when placing grids
-		private List<MyObjectBuilder_CubeGrid> GridsToPlace = null;
+		public List<MyObjectBuilder_CubeGrid> GridsToPlace = null;
 		private List<MyCubeGrid> CubeGridsToPlace = null;
 
-		public override bool IsSerialized()
-		{
-			Save();
-			return base.IsSerialized();
-		}
-
+		/// <summary>
+		/// General initialize
+		/// </summary>
 		public override void Init(MyObjectBuilder_EntityBase objectBuilder)
 		{
 			base.Init(objectBuilder);
+
+			ModBlock = Entity as IMyTerminalBlock;
+			Grid = ModBlock.CubeGrid;
+			CubeBlock = (MyCubeBlock)ModBlock;
+			GridList = new NetSync<List<string>>(this, TransferType.Both, new List<string>());
 
 			if (MyAPIGateway.Session.IsServer)
 			{
 				Load();
 			}
 
-			ModBlock = Entity as IMyTerminalBlock;
-			Grid = ModBlock.CubeGrid;
-			CubeBlock = (MyCubeBlock)ModBlock;
-
-			GridFilenames = new NetSync<string>(this, TransferType.Both, "", true);
-			GridFilenames.ValueChanged += GridListChanged;
-
 			NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
 		}
 
-		public void GridListChanged(string oldval, string newval)
+		
+
+		/// <summary>
+		/// Save stored grid information on world save.
+		/// </summary>
+		public override bool IsSerialized()
 		{
-			MyLog.Default.Info($"[Grid Storage] replacing \"{oldval}\" with \"{newval}\"");
-			GridFilenamesList.Clear();
-			GridFilenamesList.AddRange(newval.Split(new string[] { "?/#/#?" }, StringSplitOptions.RemoveEmptyEntries));
+			Save();
+			return base.IsSerialized();
 		}
 
+		public void RemoveGridFromList(string name)
+		{
+			GridList.Value.Remove(name);
+			if (GridList.Value.Count > 0)
+			{
+				SelectedGrid = GridList.Value[0];
+			}
+			else
+			{
+				SelectedGrid = null;
+			}
+
+			GridList.Push();
+		}
+			 
 		private void StartSpectatorView()
 		{
 			Vector3D blockPosition = Entity.GetPosition();
@@ -90,20 +103,6 @@ namespace GridStorage
 			CameraController = MyAPIGateway.Session.CameraController;
 
 			NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME;
-		}
-
-		private void EndSpectatorView()
-		{
-			if (GridSelectionMode)
-			{
-				SavePrefab();
-			}
-			else
-			{
-				PlacePrefab();
-			}
-
-			ResetView();
 		}
 
 		private void CancelSpectorView()
@@ -149,6 +148,48 @@ namespace GridStorage
 			NeedsUpdate = MyEntityUpdateEnum.NONE;
 		}
 
+		private void StoreSelectedGridAction(IMyTerminalBlock block)
+		{
+			GridStorageBlock gsb = block.GameLogic.GetAs<GridStorageBlock>();
+			if (gsb != null)
+			{
+				gsb.GridSelectionMode = true;
+				gsb.StartSpectatorView();
+			}
+		}
+
+		private void SpawnSelectedGridAction(IMyTerminalBlock block)
+		{
+			GridStorageBlock gsb = block.GameLogic.GetAs<GridStorageBlock>();
+			if (gsb != null)
+			{
+				gsb.GridsToPlace = null;
+				gsb.CubeGridsToPlace = null;
+
+				if (MyAPIGateway.Multiplayer.IsServer)
+				{
+					Prefab fab = Core.LoadPrefab(gsb.Entity.EntityId, gsb.SelectedGrid);
+
+					if (fab != null)
+					{
+						gsb.GridsToPlace = fab.UnpackGrids();
+					}
+				}
+				else
+				{
+					PreviewGridData data = new PreviewGridData() {
+						BlockId = gsb.Entity.EntityId,
+						GridName = gsb.SelectedGrid
+					};
+
+					Network.SendCommand(Core.Command_Preview, null, MyAPIGateway.Utilities.SerializeToBinary(data));
+				}
+
+				gsb.GridSelectionMode = false;
+				gsb.StartSpectatorView();
+			}
+		}
+
 		/// <summary>
 		/// Update visual while selecting
 		/// </summary>
@@ -167,255 +208,8 @@ namespace GridStorage
 				CancelSpectorView();
 			}
 
-			DisplayNotification($"Select (LMB) - Cancel (RMB) - Camera Orbit ({gridToCamera.Length().ToString("n0")}/1000) - Range (500)", 1, "White");
+			MyAPIGateway.Utilities.ShowNotification($"Select (LMB) - Cancel (RMB) - Camera Orbit ({gridToCamera.Length().ToString("n0")}/1000) - Range (500)", 1, "White");
 
-			if (CameraController != MyAPIGateway.Session.CameraController)
-			{
-				CancelSpectorView();
-				return;
-			}
-
-			if (GridSelectionMode)
-			{
-				GridSelect();
-			}
-			else
-			{
-				GridPlacement();
-			}
-		}
-
-		private void SavePrefab()
-		{
-			try
-			{
-				if (SelectedGridEntity == null)
-					return;
-
-				// create prefab from parent and subgrids
-				Prefab prefab = new Prefab() {
-					StorageBlockId = Entity.EntityId,
-					Name = SelectedGridEntity.DisplayName
-				};
-				// forced into doing strings cause the dumb serializer is erroring out otherwise.
-				prefab.Grids.Add(MyAPIGateway.Utilities.SerializeToXML((MyObjectBuilder_CubeGrid)SelectedGridEntity.GetObjectBuilder()));
-
-				List<IMyCubeGrid> grids = MyAPIGateway.GridGroups.GetGroup(SelectedGridEntity, GridLinkTypeEnum.Mechanical);
-				MyLog.Default.Info($"[Grid Storage] Getting subgrids {grids.Count}");
-				grids.Remove(SelectedGridEntity);
-
-				for (int i = 0; i < grids.Count; i++)
-				{
-					prefab.Grids.Add(MyAPIGateway.Utilities.SerializeToXML((MyObjectBuilder_CubeGrid)grids[i].GetObjectBuilder()));
-				}
-
-				// update terminal display
-
-				string baseName = SelectedGridEntity.DisplayName;
-				int index = 0;
-				string prefabName;
-
-				do
-				{
-					index++;
-					prefabName = $"{baseName}{((index > 1) ? $"_{index}" : "")}";
-				}
-				while (GridFilenamesList.Contains(prefabName));
-
-				GridFilenamesList.Add(prefabName);
-				GridFilenames.Value = string.Join("?/#/#?", GridFilenamesList.ToArray());
-				SelectedGrid = prefabName;
-
-				MyLog.Default.Info($"[Grid Storage] Attempting to save \"{prefabName}\"");
-
-				// write prefab to file
-
-				string data = MyAPIGateway.Utilities.SerializeToXML(prefab);
-
-				TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage($"{Entity.EntityId}_{prefabName}", typeof(Prefab));
-				writer.Write(data);
-				writer.Close();
-
-				MyLog.Default.Info($"[Grid Storage] Removing grids");
-
-				// remove existing grid from world
-				MyAPIGateway.Entities.MarkForClose(SelectedGridEntity);
-
-				foreach (IMyCubeGrid grid in grids)
-				{
-					MyAPIGateway.Entities.MarkForClose(grid);
-				}
-			}
-			catch (Exception e)
-			{
-				MyLog.Default.Error(e.ToString());
-			}
-		}
-
-		private List<MyObjectBuilder_CubeGrid> LoadPrefab()
-		{
-			try
-			{
-				if (SelectedGrid == null)
-					return null;
-
-				string filename = $"{Entity.EntityId}_{SelectedGrid}";
-
-				if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(filename, typeof(Prefab)))
-				{
-					EndSpectatorView();
-					return null;
-				}
-
-				TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(filename, typeof(Prefab));
-				string text = reader.ReadToEnd();
-				reader.Close();
-
-				Prefab fab = MyAPIGateway.Utilities.SerializeFromXML<Prefab>(text);
-				List<MyObjectBuilder_CubeGrid> grids = new List<MyObjectBuilder_CubeGrid>();
-
-				foreach (string gridText in fab.Grids)
-				{
-					grids.Add(MyAPIGateway.Utilities.SerializeFromXML<MyObjectBuilder_CubeGrid>(gridText));
-				}
-
-				return grids;
-
-			}
-			catch (Exception e)
-			{
-				MyLog.Default.Error(e.ToString());
-				return null;
-			}
-		}
-
-		private void PlacePrefab()
-		{
-			if (CubeGridsToPlace != null)
-			{
-				foreach (var grid in CubeGridsToPlace)
-				{
-					MyAPIGateway.Entities.MarkForClose(grid);
-				}
-			}
-
-			MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
-			matrix.Translation += (matrix.Forward * PlacementDistance);
-
-			CreatePhysicalGrid(GridsToPlace, matrix);
-
-			GridFilenamesList.Remove(SelectedGrid);
-			if (GridFilenamesList.Count > 0)
-			{
-				SelectedGrid = GridFilenamesList[0];
-			}
-
-		}
-
-		private List<MyCubeGrid> CreateGridProjection(List<MyObjectBuilder_CubeGrid> grids)
-		{
-			if (grids == null || grids.Count == 0)
-			{
-				return null;
-			}
-
-			MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
-			foreach (MyObjectBuilder_CubeGrid grid in grids)
-			{
-				grid.AngularVelocity = new SerializableVector3();
-				grid.LinearVelocity = new SerializableVector3();
-				grid.XMirroxPlane = null;
-				grid.YMirroxPlane = null;
-				grid.ZMirroxPlane = null;
-				grid.IsStatic = false;
-				grid.CreatePhysics = false;
-				grid.IsRespawnGrid = false;
-			}
-
-			List<MyCubeGrid> cubeGrids = new List<MyCubeGrid>();
-			foreach (MyObjectBuilder_CubeGrid grid in grids)
-			{
-				MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
-				childGrid.IsPreview = true;
-
-				cubeGrids.Add(childGrid);
-			}
-
-			return cubeGrids;
-
-		}
-
-		private void CreatePhysicalGrid(List<MyObjectBuilder_CubeGrid> grids, MatrixD position)
-		{
-			if (grids == null || grids.Count == 0)
-			{
-				return;
-			}
-
-			MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
-			foreach (MyObjectBuilder_CubeGrid grid in grids)
-			{
-				grid.AngularVelocity = new SerializableVector3();
-				grid.LinearVelocity = new SerializableVector3();
-				grid.XMirroxPlane = null;
-				grid.YMirroxPlane = null;
-				grid.ZMirroxPlane = null;
-				grid.IsStatic = false;
-				grid.CreatePhysics = true;
-				grid.IsRespawnGrid = false;
-			}
-
-			Vector3D parentPosition = grids[0].PositionAndOrientation.Value.Position;
-
-			foreach (MyObjectBuilder_CubeGrid grid in grids)
-			{
-				Vector3D offset = parentPosition - grid.PositionAndOrientation.Value.Position;
-				grid.PositionAndOrientation = new MyPositionAndOrientation((position.Translation - offset), grid.PositionAndOrientation.Value.Forward, grid.PositionAndOrientation.Value.Up);
-
-
-				MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
-				childGrid.Render.Visible = true;
-
-			}
-		}
-
-		private void StoreSelectedGridAction(IMyTerminalBlock block)
-		{
-			GridStorageBlock gsb = block.GameLogic.GetAs<GridStorageBlock>();
-			if (gsb != null)
-			{
-				gsb.GridSelectionMode = true;
-				gsb.StartSpectatorView();
-			}
-		}
-
-		private void SpawnSelectedGridAction(IMyTerminalBlock block)
-		{
-			GridStorageBlock gsb = block.GameLogic.GetAs<GridStorageBlock>();
-			if (gsb != null)
-			{
-				gsb.GridsToPlace = gsb.LoadPrefab();
-				gsb.CubeGridsToPlace = gsb.CreateGridProjection(gsb.GridsToPlace);
-
-				if (gsb.CubeGridsToPlace != null)
-				{
-					gsb.GridSelectionMode = false;
-					gsb.StartSpectatorView();
-				}
-			}
-		}
-
-		private static void ShowHideBoundingBoxGridGroup(IMyCubeGrid grid, bool enabled, Vector4? color = null)
-		{
-			List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical);
-			foreach (MyCubeGrid sub in subgrids)
-			{
-				MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(sub, enabled, color, GridSelectLineSize);
-			}
-		}
-
-		private void GridSelect()
-		{
 			List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
 			MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
 
@@ -425,6 +219,24 @@ namespace GridStorage
 				return;
 			}
 
+			if (CameraController != MyAPIGateway.Session.CameraController)
+			{
+				CancelSpectorView();
+				return;
+			}
+
+			if (GridSelectionMode)
+			{
+				GridSelect(buttons);
+			}
+			else
+			{
+				GridPlacement(buttons);
+			}
+		}
+
+		private void GridSelect(List<MyMouseButtonsEnum> buttons)
+		{
 			MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
 			Vector3D start = matrix.Translation;
 			Vector3D end = start + (matrix.Forward * 500);
@@ -487,18 +299,45 @@ namespace GridStorage
 
 				if (GridSelectErrorMessage != null)
 				{
-					DisplayNotification(GridSelectErrorMessage, 1, "Red");
+					MyAPIGateway.Utilities.ShowNotification(GridSelectErrorMessage, 1, "Red");
 
 				}
 				else if (buttons.Contains(MyMouseButtonsEnum.Left))
 				{
-					SavePrefab();
+					if (MyAPIGateway.Multiplayer.IsServer)
+					{
+						if (SelectedGridEntity != null)
+						{
+							string name = Core.SavePrefab(SelectedGridEntity.EntityId, Entity.EntityId);
+							GridList.Value.Add(name);
+							GridList.Push();
+						}
+					}
+					else
+					{
+						StoreGridData data = new StoreGridData() { BlockId = Entity.EntityId, Target = SelectedGridEntity.EntityId };
+
+						Network.SendCommand(Core.Command_Store, data: MyAPIGateway.Utilities.SerializeToBinary(data));
+					}
+
+					ResetView();
 				}
 			}
 		}
 
-		private void GridPlacement()
+		private void GridPlacement(List<MyMouseButtonsEnum> buttons)
 		{
+			// initialize preview grid once it is available
+			if (!GridSelectionMode && GridsToPlace == null)
+			{
+				return;
+			}
+			else if (CubeGridsToPlace == null)
+			{
+				CubeGridsToPlace = CreateGridProjection(GridsToPlace);
+			}
+
+			// limit placement distance
 			PlacementDistance += ((float)MyAPIGateway.Input.DeltaMouseScrollWheelValue() / 4f);
 
 			if (PlacementDistance < 0)
@@ -515,7 +354,6 @@ namespace GridStorage
 			foreach (MyCubeGrid grid in CubeGridsToPlace)
 			{
 				Vector3D offset = parentMatrix.Translation - grid.WorldMatrix.Translation;
-
 				MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
 				matrix.Translation -= offset;
 				matrix.Translation += (matrix.Forward * PlacementDistance);
@@ -523,8 +361,8 @@ namespace GridStorage
 				grid.Teleport(matrix);
 			}
 
+			// validate grid placement position
 			bool isValid = true;
-
 			BoundingBoxD box = CubeGridsToPlace[0].GetPhysicalGroupAABB();
 			List<IMyEntity> entities = MyAPIGateway.Entities.GetEntitiesInAABB(ref box);
 			entities.RemoveAll((e) => !(e is MyVoxelBase || (e is IMyCubeBlock && !CubeGridsToPlace.Contains((MyCubeGrid)(e as IMyCubeBlock).CubeGrid)) || e is IMyCharacter || e is IMyFloatingObject));
@@ -541,7 +379,7 @@ namespace GridStorage
 						MyTuple<float, float> voxelcheck = (ent as MyVoxelBase).GetVoxelContentInBoundingBox_Fast(grid.PositionComp.LocalAABB, grid.WorldMatrix);
 						if (!float.IsNaN(voxelcheck.Item2) && voxelcheck.Item2 > 0.1f)
 						{
-							DisplayNotification($"Voxel Obstruction {(voxelcheck.Item2 * 100).ToString("n2")}%", 1, "Red");
+							MyAPIGateway.Utilities.ShowNotification($"Voxel Obstruction {(voxelcheck.Item2 * 100).ToString("n2")}%", 1, "Red");
 							isValid = false;
 							break;
 						}
@@ -549,8 +387,68 @@ namespace GridStorage
 				}
 				else
 				{
-					DisplayNotification($"Obstruction {ent.GetType().Name} {ent.DisplayName}", 1, "Red");
+					MyAPIGateway.Utilities.ShowNotification($"Obstruction {ent.GetType().Name} {ent.DisplayName}", 1, "Red");
 					isValid = false;
+				}
+			}
+
+			ulong steamId = MyAPIGateway.Session.Player.SteamUserId;
+			long userId = MyAPIGateway.Session.Player.IdentityId;
+
+			foreach (MySafeZone zone in MySessionComponentSafeZones.SafeZones)
+			{
+				bool flag = false;
+				if (zone.Shape == MySafeZoneShape.Sphere)
+				{
+					flag = new BoundingSphereD(zone.PositionComp.GetPosition(), zone.Radius).Intersects(box);
+				}
+				flag = new MyOrientedBoundingBoxD(zone.PositionComp.LocalAABB, zone.PositionComp.WorldMatrix).Intersects(ref box);
+
+				if (flag)
+				{
+					if (steamId != 0L && MySafeZone.CheckAdminIgnoreSafezones(steamId))
+					{
+						continue;
+					}
+
+					if (zone.AccessTypePlayers == MySafeZoneAccess.Whitelist)
+					{
+						if (zone.Players.Contains(userId))
+						{
+							continue;
+						}
+					}
+					else if (zone.Players.Contains(userId))
+					{
+						MyAPIGateway.Utilities.ShowNotification($"Player is blacklisted. Can not spawn in this safezone", 1, "Red");
+						isValid = false;
+						break;
+					}
+
+					IMyFaction myFaction = MyAPIGateway.Session.Factions.TryGetPlayerFaction(userId);
+					if (myFaction != null)
+					{
+						if (zone.AccessTypeFactions == MySafeZoneAccess.Whitelist)
+						{
+							if (zone.Factions.Find(x => x == myFaction) != null)
+							{
+								continue;
+							}
+						}
+						else if (zone.Factions.Find(x => x == myFaction) != null)
+						{
+							MyAPIGateway.Utilities.ShowNotification($"Your faction is blacklisted. Can not spawn in this safezone", 1, "Red");
+							isValid = false;
+							break;
+						}
+					}
+
+					if (zone.AccessTypeFactions == MySafeZoneAccess.Whitelist)
+					{
+						MyAPIGateway.Utilities.ShowNotification($"Can not spawn in this safezone", 1, "Red");
+						isValid = false;
+						break;
+					}
 				}
 			}
 
@@ -563,19 +461,79 @@ namespace GridStorage
 				ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], true, Color.Red.ToVector4());
 			}
 
-			List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
-			MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
-
-			if (buttons.Contains(MyMouseButtonsEnum.Right))
-			{
-				CancelSpectorView();
-				return;
-			}
-
+			// place grid
 			if (isValid && buttons.Contains(MyMouseButtonsEnum.Left))
 			{
-				EndSpectatorView();
-				return;
+				if (CubeGridsToPlace != null)
+				{
+					foreach (var grid in CubeGridsToPlace)
+					{
+						MyAPIGateway.Entities.MarkForClose(grid);
+					}
+				}
+
+				MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
+				matrix.Translation += (matrix.Forward * PlacementDistance);
+
+				if (MyAPIGateway.Multiplayer.IsServer)
+				{
+					Core.PlacePrefab(GridsToPlace, matrix.Translation, $"{Entity.EntityId}_{SelectedGrid}");
+					RemoveGridFromList(SelectedGrid);
+				}
+				else
+				{
+					PlaceGridData data = new PlaceGridData() {
+						BlockId = Entity.EntityId,
+						GridName = SelectedGrid,
+						Position = new SerializableVector3D(matrix.Translation)
+					};
+
+					Network.SendCommand(Core.Command_Place, null, MyAPIGateway.Utilities.SerializeToBinary(data));
+				}
+
+				ResetView();
+			}
+		}
+
+		private List<MyCubeGrid> CreateGridProjection(List<MyObjectBuilder_CubeGrid> grids)
+		{
+			if (grids == null || grids.Count == 0)
+			{
+				return null;
+			}
+
+			MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
+			foreach (MyObjectBuilder_CubeGrid grid in grids)
+			{
+				grid.AngularVelocity = new SerializableVector3();
+				grid.LinearVelocity = new SerializableVector3();
+				grid.XMirroxPlane = null;
+				grid.YMirroxPlane = null;
+				grid.ZMirroxPlane = null;
+				grid.IsStatic = false;
+				grid.CreatePhysics = false;
+				grid.IsRespawnGrid = false;
+			}
+
+			List<MyCubeGrid> cubeGrids = new List<MyCubeGrid>();
+			foreach (MyObjectBuilder_CubeGrid grid in grids)
+			{
+				MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
+				childGrid.IsPreview = true;
+
+				cubeGrids.Add(childGrid);
+			}
+
+			return cubeGrids;
+
+		}
+
+		private static void ShowHideBoundingBoxGridGroup(IMyCubeGrid grid, bool enabled, Vector4? color = null)
+		{
+			List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical);
+			foreach (MyCubeGrid sub in subgrids)
+			{
+				MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(sub, enabled, color, GridSelectLineSize);
 			}
 		}
 
@@ -593,9 +551,32 @@ namespace GridStorage
 			return false;
 		}
 
+		public void ValidateGridList()
+		{
+			bool flag = false;
+			foreach (string value in GridList.Value)
+			{
+				if (!MyAPIGateway.Utilities.FileExistsInWorldStorage($"{Entity.EntityId}_{value}", typeof(Prefab)))
+				{
+					flag = true;
+					GridList.Value.Remove(value);
+				}
+			}
+
+			if (flag)
+			{
+				GridList.Push();
+			}
+		}
+
 		#region create controls
 		public override void UpdateOnceBeforeFrame()
 		{
+			if (MyAPIGateway.Multiplayer.IsServer)
+			{
+				ValidateGridList();
+			}
+
 			// do not run the rest on dedicated servers
 			if (MyAPIGateway.Utilities.IsDedicated)
 				return;
@@ -613,7 +594,7 @@ namespace GridStorage
 			(block, items, selected) => {
 				GridStorageBlock drive = block.GameLogic?.GetAs<GridStorageBlock>();
 
-				foreach (string filename in drive.GridFilenamesList)
+				foreach (string filename in drive.GridList.Value)
 				{
 					MyTerminalControlListBoxItem listItem = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(filename), MyStringId.GetOrCompute(""), filename);
 					items.Add(listItem);
@@ -647,54 +628,66 @@ namespace GridStorage
 
 		#endregion
 
-		public static MyModStorageComponentBase GetStorage(IMyEntity entity)
-		{
-			return entity.Storage ?? (entity.Storage = new MyModStorageComponent());
-		}
-
-
+		/// <summary>
+		/// Save grid list to world save file
+		/// </summary>
 		private void Save()
 		{
 			MyModStorageComponentBase storage = GetStorage(Entity);
 
+			string value = string.Join("||//||", GridList.Value);
 			if (storage.ContainsKey(StorageGuid))
 			{
-				storage[StorageGuid] = GridFilenames.Value;
+				storage[StorageGuid] = value;
 				MyLog.Default.Info($"[Grid Storage] Data Saved");
 			}
 			else
 			{
 				MyLog.Default.Info($"[Grid Storage] {Entity.EntityId}: Saved new data");
-				storage.Add(new KeyValuePair<Guid, string>(StorageGuid, GridFilenames.Value));
+
+				storage.Add(new KeyValuePair<Guid, string>(StorageGuid, value));
 			}
 		}
 
+		/// <summary>
+		/// Load grid list from world save file
+		/// </summary>
 		private void Load()
 		{
-			MyModStorageComponentBase storage = GetStorage(Entity);
+			try
+			{
+				MyModStorageComponentBase storage = GetStorage(Entity);
 
-			if (storage.ContainsKey(StorageGuid))
-			{
-				GridFilenames.Value = storage[StorageGuid];
-				MyLog.Default.Info($"[Grid Storage] Data loaded: {GridFilenames.Value}");
+				if (storage.ContainsKey(StorageGuid))
+				{
+					List<string> names = new List<string>(storage[StorageGuid].Split(new string[] { "||//||" }, StringSplitOptions.RemoveEmptyEntries));
+
+					foreach (string name in names)
+					{
+
+					}
+
+					GridList.SetValue(names, SyncType.None);
+
+					MyLog.Default.Info($"[Grid Storage] Data loaded: {GridList.Value.Count} grids");
+				}
+				else
+				{
+					MyLog.Default.Info($"[Grid Storage] No data saved for: {Entity.EntityId}");
+				}
 			}
-			else
+			catch (Exception e)
 			{
-				MyLog.Default.Info($"[Grid Storage] No data saved for: {Entity.EntityId}");
+				MyLog.Default.Error($"[Grid Storage] {e.ToString()}");
 			}
 		}
 
-
-		private void DisplayNotification(string text, int lifetime, string color)
+		/// <summary>
+		/// Ensures the entities storage component exists for saving reasons
+		/// </summary>
+		public static MyModStorageComponentBase GetStorage(IMyEntity entity)
 		{
-
-			if (MyAPIGateway.Utilities.IsDedicated)
-			{
-				MyLog.Default.Info($"[Grid Storage] {ModBlock.EntityId} msg: {text}");
-				return;
-			}
-
-			MyAPIGateway.Utilities.ShowNotification(text, lifetime, color);
+			return entity.Storage ?? (entity.Storage = new MyModStorageComponent());
 		}
 	}
 }
