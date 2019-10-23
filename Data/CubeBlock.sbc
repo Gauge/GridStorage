@@ -36,7 +36,7 @@
         <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\ProjectorConstruction_2.mwm" />
         <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\ProjectorConstruction_3.mwm" />
       </BuildProgressModels>
-      <BlockPairName>Projector</BlockPairName>
+      <BlockPairName>GridStorage</BlockPairName>
       <BuildTimeSeconds>20</BuildTimeSeconds>
       <MirroringX>Z</MirroringX>
       <MirroringZ>X</MirroringZ>

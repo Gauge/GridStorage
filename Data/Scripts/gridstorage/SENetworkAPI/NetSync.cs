@@ -70,11 +70,6 @@ namespace SENetworkAPI
 		public Action<T, T, ulong> ValueChangedByNetwork;
 
 		/// <summary>
-		/// Fires when the value is requested
-		/// </summary>
-		//public Action<ulong> ValueRequested;
-
-		/// <summary>
 		/// this property syncs across the network when changed
 		/// </summary>
 		public T Value
