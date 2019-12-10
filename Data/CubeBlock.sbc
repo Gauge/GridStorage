@@ -6,7 +6,7 @@
         <TypeId>UpgradeModule</TypeId>
         <SubtypeId>GridStorageBlock</SubtypeId>
       </Id>
-      <DisplayName>Grid Storage Block</DisplayName>
+      <DisplayName>Grid Garage</DisplayName>
       <Icon>Textures\GUI\Icons\Cubes\Projector.dds</Icon>
       <Description>Stores and respawns grids</Description>
       <CubeSize>Large</CubeSize>
@@ -36,7 +36,7 @@
         <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\ProjectorConstruction_2.mwm" />
         <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\ProjectorConstruction_3.mwm" />
       </BuildProgressModels>
-      <BlockPairName>GridStorage</BlockPairName>
+      <BlockPairName>GridGarage</BlockPairName>
       <BuildTimeSeconds>20</BuildTimeSeconds>
       <MirroringX>Z</MirroringX>
       <MirroringZ>X</MirroringZ>

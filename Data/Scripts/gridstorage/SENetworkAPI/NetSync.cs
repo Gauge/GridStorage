@@ -109,28 +109,31 @@ namespace SENetworkAPI
 		/// </summary>
 		public void SetValue(T val, SyncType syncType)
 		{
-			T oldval = _value;
-			_value = val;
-			if (TransferType == TransferType.ServerToClient)
+			lock (_value)
 			{
-				if (MyAPIGateway.Multiplayer.IsServer)
+				T oldval = _value;
+				_value = val;
+				if (TransferType == TransferType.ServerToClient)
+				{
+					if (MyAPIGateway.Multiplayer.IsServer)
+					{
+						SendValue(syncType);
+					}
+				}
+				else if (TransferType == TransferType.ClientToServer)
+				{
+					if (!MyAPIGateway.Multiplayer.IsServer)
+					{
+						SendValue(syncType);
+					}
+				}
+				else if (TransferType == TransferType.Both)
 				{
 					SendValue(syncType);
 				}
-			}
-			else if (TransferType == TransferType.ClientToServer)
-			{
-				if (!MyAPIGateway.Multiplayer.IsServer)
-				{
-					SendValue(syncType);
-				}
-			}
-			else if (TransferType == TransferType.Both)
-			{
-				SendValue(syncType);
-			}
 
-			ValueChanged?.Invoke(oldval, val);
+				ValueChanged?.Invoke(oldval, val);
+			}
 		}
 
 		/// <summary>
@@ -140,16 +143,19 @@ namespace SENetworkAPI
 		{
 			try
 			{
-				T val = _value;
-				_value = MyAPIGateway.Utilities.SerializeFromBinary<T>(data);
-
-				if (NetworkAPI.LogNetworkTraffic)
+				lock (_value)
 				{
-					MyLog.Default.Info($"[NetworkAPI] <{LogicComponent.GetType().ToString()} - {Id}> New value: {_value} --- Old value: {_value}");
-				}
+					T val = _value;
+					_value = MyAPIGateway.Utilities.SerializeFromBinary<T>(data);
 
-				ValueChanged?.Invoke(val, _value);
-				ValueChangedByNetwork?.Invoke(val, _value, sender);
+					if (NetworkAPI.LogNetworkTraffic)
+					{
+						MyLog.Default.Info($"[NetworkAPI] <{LogicComponent.GetType().ToString()} - {Id}> New value: {_value} --- Old value: {_value}");
+					}
+
+					ValueChanged?.Invoke(val, _value);
+					ValueChangedByNetwork?.Invoke(val, _value, sender);
+				}
 			}
 			catch (Exception e)
 			{

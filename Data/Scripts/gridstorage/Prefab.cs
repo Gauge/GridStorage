@@ -1,8 +1,10 @@
 ﻿using ProtoBuf;
+using Sandbox.Common.ObjectBuilders;
 using Sandbox.ModAPI;
 using System.Collections.Generic;
 using VRage;
 using VRage.Game;
+using VRage.Utils;
 
 namespace GridStorage
 {
@@ -20,6 +22,20 @@ namespace GridStorage
 			foreach (string gridXML in Grids)
 			{
 				list.Add(MyAPIGateway.Utilities.SerializeFromXML<MyObjectBuilder_CubeGrid>(gridXML));
+			}
+
+			foreach (MyObjectBuilder_CubeGrid grid in list)
+			{
+				foreach (MyObjectBuilder_CubeBlock cubeBlock in grid.CubeBlocks)
+				{
+					if (cubeBlock is MyObjectBuilder_Cockpit)
+					{
+						(cubeBlock as MyObjectBuilder_Cockpit).ClearPilotAndAutopilot();
+
+						MyObjectBuilder_CryoChamber myObjectBuilder_CryoChamber = cubeBlock as MyObjectBuilder_CryoChamber;
+						myObjectBuilder_CryoChamber?.Clear();
+					}
+				}
 			}
 
 			return list;
@@ -59,6 +75,9 @@ namespace GridStorage
 		public string GridName;
 
 		[ProtoMember(3)]
+		public long NewOwner;
+
+		[ProtoMember(4)]
 		public SerializableVector3D Position;
 	}
 }
