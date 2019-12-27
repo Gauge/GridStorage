@@ -14,6 +14,94 @@ namespace GridStorage
 {
 	public static class Tools
 	{
+
+		public static MyEntityUpdateEnum Add(this MyEntityUpdateEnum me, MyEntityUpdateEnum toAdd)
+		{
+			return me | toAdd;
+		}
+
+		public static MyEntityUpdateEnum Remove(this MyEntityUpdateEnum me, MyEntityUpdateEnum toRemove)
+		{
+			return me & ~toRemove;
+		}
+
+		public static string CreateFilename(string garageGuid, string gridName) 
+		{
+			return $"{garageGuid}_{gridName}";
+		}
+
+		public static string CreateDepricatedFilename(long garageBlockId, string gridName) 
+		{
+			return $"{garageBlockId}_{gridName}";
+		}
+
+		public static MyObjectBuilder_CubeGrid CleanGrid(IMyCubeGrid ent)
+		{
+
+			MyObjectBuilder_CubeGrid grid = (MyObjectBuilder_CubeGrid)ent.GetObjectBuilder();
+
+			grid.EntityId = 0;
+			grid.AngularVelocity = new SerializableVector3();
+			grid.LinearVelocity = new SerializableVector3();
+			grid.PositionAndOrientation = new MyPositionAndOrientation(new Vector3D(), new Vector3(0, 0, 1), new Vector3(0, 1, 0));
+			grid.XMirroxPlane = null;
+			grid.YMirroxPlane = null;
+			grid.ZMirroxPlane = null;
+			grid.IsStatic = false;
+			grid.CreatePhysics = true;
+			grid.IsRespawnGrid = false;
+
+			foreach (var block in grid.CubeBlocks)
+			{
+				block.EntityId = 0;
+			}
+
+			return grid;
+		}
+
+		public static BoundingBoxD CalculateBoundingBox(List<IMyCubeGrid> grids)
+		{
+			BoundingBoxD box = new BoundingBoxD();
+
+			foreach (IMyCubeGrid grid in grids)
+			{
+				Vector3D gMin = grid.WorldAABB.Min;
+				Vector3D gMax = grid.WorldAABB.Max;
+
+				if (gMin.X < box.Min.X)
+				{
+					box.Min.X = gMin.X;
+				}
+
+				if (gMin.Y < box.Min.Y)
+				{
+					box.Min.Y = gMin.Y;
+				}
+
+				if (gMin.Z < box.Min.Z)
+				{
+					box.Min.Z = gMin.Z;
+				}
+
+				if (gMax.X > box.Max.X)
+				{
+					box.Max.X = gMax.X;
+				}
+
+				if (gMax.Z > box.Max.Z)
+				{
+					box.Max.Z = gMax.Z;
+				}
+
+				if (gMax.Z > box.Max.Z)
+				{
+					box.Max.Z = gMax.Z;
+				}
+			}
+
+			return box;
+		}
+
 		private static IMyTerminalControl ControlIdExists(string id)
 		{
 			List<IMyTerminalControl> controls = new List<IMyTerminalControl>();
@@ -32,6 +120,23 @@ namespace GridStorage
 			IMyTerminalAction action = actions.Find(x => x.Id == id);
 
 			return action;
+		}
+
+
+		public static IMyTerminalControlLabel CreateControlLabel(string id, string labelText, Func<IMyTerminalBlock, bool> visible, Func<IMyTerminalBlock, bool> enabled)
+		{
+			if (ControlIdExists(id) != null)
+				return null;
+
+			IMyTerminalControlLabel label = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlLabel, IMyUpgradeModule>(id);
+			label.Enabled = enabled;
+			label.Visible = visible;
+			label.SupportsMultipleBlocks = false;
+
+			label.Label = MyStringId.GetOrCompute(labelText);
+
+			MyAPIGateway.TerminalControls.AddControl<IMyUpgradeModule>(label);
+			return label;
 		}
 
 		public static void CreateControlButton(string id, string title, string tooltip, Func<IMyTerminalBlock, bool> visible, Func<IMyTerminalBlock, bool> enabled, Action<IMyTerminalBlock> action)
@@ -227,73 +332,6 @@ namespace GridStorage
 			button.Action = action;
 
 			MyAPIGateway.TerminalControls.AddAction<IMyUpgradeModule>(button);
-		}
-
-		public static MyObjectBuilder_CubeGrid CleanGrid(IMyCubeGrid ent)
-		{
-
-			MyObjectBuilder_CubeGrid grid = (MyObjectBuilder_CubeGrid)ent.GetObjectBuilder();
-
-			grid.EntityId = 0;
-			grid.AngularVelocity = new SerializableVector3();
-			grid.LinearVelocity = new SerializableVector3();
-			grid.PositionAndOrientation = new MyPositionAndOrientation(new Vector3D(), new Vector3(0, 0, 1), new Vector3(0, 1, 0));
-			grid.XMirroxPlane = null;
-			grid.YMirroxPlane = null;
-			grid.ZMirroxPlane = null;
-			grid.IsStatic = false;
-			grid.CreatePhysics = true;
-			grid.IsRespawnGrid = false;
-
-			foreach (var block in grid.CubeBlocks)
-			{
-				block.EntityId = 0;
-			}
-
-			return grid;
-		}
-
-		public static BoundingBoxD CalculateBoundingBox(List<IMyCubeGrid> grids)
-		{
-			BoundingBoxD box = new BoundingBoxD();
-
-			foreach (IMyCubeGrid grid in grids)
-			{
-				Vector3D gMin = grid.WorldAABB.Min;
-				Vector3D gMax = grid.WorldAABB.Max;
-
-				if (gMin.X < box.Min.X)
-				{
-					box.Min.X = gMin.X;
-				}
-
-				if (gMin.Y < box.Min.Y)
-				{
-					box.Min.Y = gMin.Y;
-				}
-
-				if (gMin.Z < box.Min.Z)
-				{
-					box.Min.Z = gMin.Z;
-				}
-
-				if (gMax.X > box.Max.X)
-				{
-					box.Max.X = gMax.X;
-				}
-
-				if (gMax.Z > box.Max.Z)
-				{
-					box.Max.Z = gMax.Z;
-				}
-
-				if (gMax.Z > box.Max.Z)
-				{
-					box.Max.Z = gMax.Z;
-				}
-			}
-
-			return box;
 		}
 
 	}

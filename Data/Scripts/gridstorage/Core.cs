@@ -27,9 +27,14 @@ namespace GridStorage
 		public const string Command_Store = "store";
 		public const string Command_Preview = "preview";
 		public const string Command_Place = "place";
+		public const string Command_Settings = "settings";
+
+		public int waitInterval = 0;
 
 		private static DateTime storeTime = DateTime.MinValue;
 		private static DateTime placementTime = DateTime.MinValue;
+
+		public static Settings Config;
 
 		public override void Init(MyObjectBuilder_SessionComponent sessionComponent)
 		{
@@ -42,13 +47,44 @@ namespace GridStorage
 
 			if (MyAPIGateway.Multiplayer.IsServer)
 			{
+				Config = Settings.Load();
 				Network.RegisterNetworkCommand(Command_Store, Store_Server);
 				Network.RegisterNetworkCommand(Command_Preview, Preview_Server);
 				Network.RegisterNetworkCommand(Command_Place, Place_Server);
+				Network.RegisterNetworkCommand(Command_Settings, Settings_Server);
+
 			}
 			else
 			{
+				SetUpdateOrder(MyUpdateOrder.BeforeSimulation);
+				Config = Settings.GetDefaults();
 				Network.RegisterNetworkCommand(Command_Preview, Preview_Client);
+				Network.RegisterNetworkCommand(Command_Settings, Settings_Client);
+			}
+		}
+
+		public override void UpdateBeforeSimulation()
+		{
+			waitInterval++;
+
+			if (waitInterval == 120) 
+			{
+				MyLog.Default.Info($"[Grid Garage] requesting server config file");
+				Network.SendCommand(Command_Settings);
+				waitInterval = 0;
+			}
+		}
+
+
+		private void Settings_Server(ulong steamId, string command, byte[] data, DateTime timestamp)
+		{
+			try 
+			{
+				Network.SendCommand(Command_Settings, null, MyAPIGateway.Utilities.SerializeToBinary(Config), steamId: steamId);
+			}
+			catch (Exception e)
+			{
+				MyLog.Default.Error(e.ToString());
 			}
 		}
 
@@ -68,11 +104,9 @@ namespace GridStorage
 				}
 
 				StoreGridData storeData = MyAPIGateway.Utilities.SerializeFromBinary<StoreGridData>(data);
-				string prefabName = SavePrefab(storeData.Target, storeData.BlockId);
+				string prefabName = SavePrefab(storeData.TargetId, storeData.GarageGuid);
 
-				MyLog.Default.Info($"[Grid Garage] Storing: <{storeData.BlockId}> - {prefabName}");
-
-				IMyEntity ent = MyAPIGateway.Entities.GetEntityById(storeData.BlockId);
+				IMyEntity ent = MyAPIGateway.Entities.GetEntityById(storeData.GarageEntityId);
 				GridStorageBlock block = ent.GameLogic as GridStorageBlock;
 				block.GridList.Value.Add(prefabName);
 				block.GridList.Push();
@@ -89,20 +123,34 @@ namespace GridStorage
 			{
 				PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
 
-				Prefab fab = LoadPrefab(preview.BlockId, preview.GridName);
+				Prefab fab = LoadPrefab(preview.GarageEntityId, preview.GarageGuid, preview.GridName);
 				preview.Prefab = fab;
 
 				if (fab == null)
 				{
 					MyLog.Default.Warning($"[Grid Garage] Failed to find grid \"{preview.GridName}\"");
 
-					IMyEntity ent = MyAPIGateway.Entities.GetEntityById(preview.BlockId);
+					IMyEntity ent = MyAPIGateway.Entities.GetEntityById(preview.GarageEntityId);
 					GridStorageBlock block = ent.GameLogic as GridStorageBlock;
-					block.ValidateGridList();
+					block.RemoveGridFromList(preview.GridName);
+					block.GridList.Push();
 					return;
 				}
 
 				Network.SendCommand(Command_Preview, null, MyAPIGateway.Utilities.SerializeToBinary(preview), steamId: steamId);
+			}
+			catch (Exception e)
+			{
+				MyLog.Default.Error(e.ToString());
+			}
+		}
+
+		private void Settings_Client(ulong steamId, string command, byte[] data, DateTime timestamp) 
+		{
+			try
+			{
+				Config = MyAPIGateway.Utilities.SerializeFromBinary<Settings>(data);
+				SetUpdateOrder(MyUpdateOrder.NoUpdate);
 			}
 			catch (Exception e)
 			{
@@ -116,9 +164,16 @@ namespace GridStorage
 			{
 				PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
 
-				IMyEntity ent = MyAPIGateway.Entities.GetEntityById(preview.BlockId);
-				GridStorageBlock block = ent.GameLogic as GridStorageBlock;
-				block.GridsToPlace = preview.Prefab.UnpackGrids();
+				if (preview.Prefab == null)
+				{
+					MyAPIGateway.Utilities.ShowNotification("Grid could not be found", 2000, "Red");
+				}
+				else 
+				{
+					IMyEntity ent = MyAPIGateway.Entities.GetEntityById(preview.GarageEntityId);
+					GridStorageBlock block = ent.GameLogic as GridStorageBlock;
+					block.GridsToPlace = preview.Prefab.UnpackGrids();
+				}
 			}
 			catch (Exception e)
 			{
@@ -139,23 +194,18 @@ namespace GridStorage
 				{
 					MyLog.Default.Info($"[Grid Garage] User {steamId} attempting to place grid.");
 				}
+
 				placementTime = timestamp;
 
 				PlaceGridData place = MyAPIGateway.Utilities.SerializeFromBinary<PlaceGridData>(data);
-				Prefab fab = LoadPrefab(place.BlockId, place.GridName);
-
-				IMyEntity ent = MyAPIGateway.Entities.GetEntityById(place.BlockId);
+				Prefab fab = LoadPrefab(place.GarageEntityId, place.GarageGuid, place.GridName);
+				IMyEntity ent = MyAPIGateway.Entities.GetEntityById(place.GarageEntityId);
 				GridStorageBlock block = ent.GameLogic as GridStorageBlock;
 
-				if (fab == null)
+				if (fab != null)
 				{
-					MyLog.Default.Warning($"[Grid Garage] Failed to find grid \"{place.GridName}\"");
-				}
-				else
-				{
-					PlacePrefab(fab.UnpackGrids(), place.Position, $"{place.BlockId}_{place.GridName}", place.NewOwner);
+					PlacePrefab(fab.UnpackGrids(), place.Position, Tools.CreateFilename(place.GarageGuid, place.GridName), place.NewOwner);
 					block.RemoveGridFromList(place.GridName);
-
 				}
 			}
 			catch (Exception e)
@@ -164,10 +214,11 @@ namespace GridStorage
 			}
 		}
 
-		public static string SavePrefab(long gridId, long storageBlockId)
+		public static string SavePrefab(long gridId, string garageGuid)
 		{
 			try
 			{
+				// prep data to store
 				IMyCubeGrid selectedGrid = (IMyCubeGrid)MyAPIGateway.Entities.GetEntityById(gridId);
 
 				// create prefab from parent and subgrids
@@ -183,35 +234,39 @@ namespace GridStorage
 					prefab.Grids.Add(MyAPIGateway.Utilities.SerializeToXML((MyObjectBuilder_CubeGrid)grids[i].GetObjectBuilder()));
 				}
 
-				// update terminal display
-
+				// find free filename
+				FileIndex fileIndex = FileIndex.GetFileIndex();
 				string baseName = selectedGrid.DisplayName;
 				int index = 0;
 				string prefabName;
 				Type t = typeof(Prefab);
 
+				// some grids have the same name. this adds a number to the end of identically named ships
 				do
 				{
 					index++;
 					prefabName = $"{baseName}{((index > 1) ? $"_{index}" : "")}";
 				}
-				while (MyAPIGateway.Utilities.FileExistsInWorldStorage($"{storageBlockId}_{prefabName}", t));
-
-				MyLog.Default.Info($"[Grid Garage] Attempting to save \"{prefabName}\"");
+				while (fileIndex.FileNames.Contains(prefabName));
 
 				// write prefab to file
+				MyLog.Default.Info($"[Grid Garage] Attempting to save \"{prefabName}\"");
 
+				string filename = Tools.CreateFilename(garageGuid, prefabName);
 				string data = MyAPIGateway.Utilities.SerializeToXML(prefab);
-
-				TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage($"{storageBlockId}_{prefabName}", typeof(Prefab));
+				TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage(filename, typeof(Prefab));
 				writer.Write(data);
 				writer.Close();
 
-				// this is a work around because keens DeleteFileInWorldStorage is using a local storage check instead of a world storage check.
-				// i created this dumby file to be a stand in
-				writer = MyAPIGateway.Utilities.WriteFileInLocalStorage($"{storageBlockId}_{prefabName}", typeof(Prefab));
+				// this can be removed when keen fixes their bug.
+				writer = MyAPIGateway.Utilities.WriteFileInLocalStorage(filename, typeof(Prefab));
 				writer.Write("");
 				writer.Close();
+
+				fileIndex.FileNames.Add(filename);
+				fileIndex.Save();
+
+				MyLog.Default.Info($"[Grid Garage] Prefab {prefabName} stored successfully");
 
 				// remove existing grid from world
 				MyAPIGateway.Entities.MarkForClose(selectedGrid);
@@ -226,40 +281,55 @@ namespace GridStorage
 			}
 			catch (Exception e)
 			{
-				MyLog.Default.Error(e.ToString());
+				MyLog.Default.Error($"[Grid Garage] Failed to save grid prefab:\n{e.ToString()}");
+				return null;
 			}
-
-			return null;
 		}
 
-		public static Prefab LoadPrefab(long entityId, string gridName)
+		public static Prefab LoadPrefab(long garageEntityId, string garageGuid, string gridName)
 		{
+			string filename = Tools.CreateFilename(garageGuid, gridName);
+			MyLog.Default.Info($"[Grid Garage] Loading prefab file: {filename}");
+
+			FileIndex fileIndex = FileIndex.GetFileIndex();
+			if (!fileIndex.FileNames.Contains(filename))
+			{
+				MyLog.Default.Warning($"[Grid Garage] File could not be found.");
+				return null;
+			}
+
 			try
 			{
-				string filename = $"{entityId}_{gridName}";
-
-				MyLog.Default.Info($"[Grid Garage] Loading prefab from {filename}");
-
-				if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(filename, typeof(Prefab)))
-				{
-					MyLog.Default.Warning($"[Grid Garage] File could not be found.");
-					return null;
-				}
-
 				TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(filename, typeof(Prefab));
 				string text = reader.ReadToEnd();
 				reader.Close();
 
 				Prefab prefab = MyAPIGateway.Utilities.SerializeFromXML<Prefab>(text);
-
 				return prefab;
+			}
+			catch (FileNotFoundException e) 
+			{
+				MyLog.Default.Info($"[Grid Garage] No file found matching the filename: {filename}");
+				fileIndex.FileNames.Remove(filename);
 
+				try
+				{
+					IMyEntity ent = MyAPIGateway.Entities.GetEntityById(garageEntityId);
+					GridStorageBlock block = ent.GameLogic as GridStorageBlock;
+					block.RemoveGridFromList(filename);
+					block.GridList.Push();
+				}
+				catch (Exception err) 
+				{
+					MyLog.Default.Error($"[Grid Storage] Failed to update grid list: {err.ToString()}");
+				}
 			}
 			catch (Exception e)
 			{
-				MyLog.Default.Error(e.ToString());
-				return null;
+				MyLog.Default.Error($"[Grid Garage] Failed to load grid prefab:\n{e.ToString()}");
 			}
+
+			return null;
 		}
 
 		public static void PlacePrefab(List<MyObjectBuilder_CubeGrid> grids, Vector3D position, string filename, long ownerId)
@@ -303,7 +373,13 @@ namespace GridStorage
 
 				}
 
+				FileIndex fileIndex = FileIndex.GetFileIndex();
+				fileIndex.FileNames.Remove(filename);
+				fileIndex.Save();
+
 				MyAPIGateway.Utilities.DeleteFileInWorldStorage(filename, typeof(Prefab));
+				// this can be removed when keen fixes their bug.
+				MyAPIGateway.Utilities.DeleteFileInLocalStorage(filename, typeof(Prefab));
 			}
 			catch (Exception e)
 			{
