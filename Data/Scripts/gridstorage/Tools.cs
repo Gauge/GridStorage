@@ -14,22 +14,6 @@ namespace GridStorage
 {
 	public static class Tools
 	{
-
-		public static MyEntityUpdateEnum Add(this MyEntityUpdateEnum me, MyEntityUpdateEnum toAdd)
-		{
-			return me | toAdd;
-		}
-
-		public static MyEntityUpdateEnum Remove(this MyEntityUpdateEnum me, MyEntityUpdateEnum toRemove)
-		{
-			return me & ~toRemove;
-		}
-
-		public static string CreateFilename(string garageGuid, string gridName) 
-		{
-			return $"{garageGuid}_{gridName}";
-		}
-
 		public static string CreateDepricatedFilename(long garageBlockId, string gridName) 
 		{
 			return $"{garageBlockId}_{gridName}";
@@ -121,7 +105,6 @@ namespace GridStorage
 
 			return action;
 		}
-
 
 		public static IMyTerminalControlLabel CreateControlLabel(string id, string labelText, Func<IMyTerminalBlock, bool> visible, Func<IMyTerminalBlock, bool> enabled)
 		{

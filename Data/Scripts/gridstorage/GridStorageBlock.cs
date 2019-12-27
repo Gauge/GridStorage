@@ -32,23 +32,18 @@ namespace GridStorage
         public IMyTerminalBlock ModBlock;
         public MyCubeBlock CubeBlock;
 
-        // used in terminal menu
         public NetSync<string> Id;
-        public NetSync<List<string>> GridList;
+        public NetSync<List<Prefab>> GridList;
         private NetSync<DateTime> StorageCooldown;
         private NetSync<DateTime> SpawnCooldown;
-        public string SelectedGrid = null;
-        private IMyCubeGrid SelectedGridEntity = null;
 
-        private IMyTerminalControlLabel IdLabel = null;
-
-        // used when selecting from spectator mode
         private bool GridSelectionMode = true;
         string GridSelectErrorMessage = null;
         private float PlacementDistance = 200;
         private IMyCameraController CameraController = null;
 
-        // used when placing grids
+        public Prefab SelectedPrefab = null;
+        private IMyCubeGrid SelectedGridEntity = null;
         public List<MyObjectBuilder_CubeGrid> GridsToPlace = null;
         private List<MyCubeGrid> CubeGridsToPlace = null;
 
@@ -64,12 +59,9 @@ namespace GridStorage
                 ModBlock = Entity as IMyTerminalBlock;
                 Grid = ModBlock.CubeGrid;
                 CubeBlock = (MyCubeBlock)ModBlock;
-                Id = new NetSync<string>(this, TransferType.ServerToClient, string.Empty);
-                GridList = new NetSync<List<string>>(this, TransferType.ServerToClient, new List<string>());
+                GridList = new NetSync<List<Prefab>>(this, TransferType.ServerToClient, new List<Prefab>());
                 StorageCooldown = new NetSync<DateTime>(this, TransferType.Both, DateTime.MinValue);
                 SpawnCooldown = new NetSync<DateTime>(this, TransferType.Both, DateTime.MinValue);
-
-                Id.ValueChanged += IdValueChanged;
 
                 if (MyAPIGateway.Session.IsServer)
                 {
@@ -80,14 +72,6 @@ namespace GridStorage
             NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
         }
 
-        private void IdValueChanged(string old, string value) 
-        {
-            if (IdLabel != null) 
-            {
-                IdLabel.Label = MyStringId.GetOrCompute($"Garage ID: {value}");
-            }
-        }
-
         /// <summary>
         /// Save stored grid information on world save.
         /// </summary>
@@ -95,28 +79,6 @@ namespace GridStorage
         {
             Save();
             return base.IsSerialized();
-        }
-
-        public void RemoveGridFromList(string name)
-        {
-            try
-            {
-                GridList.Value.Remove(name);
-                if (GridList.Value.Count > 0)
-                {
-                    SelectedGrid = GridList.Value[0];
-                }
-                else
-                {
-                    SelectedGrid = null;
-                }
-
-                GridList.Push();
-            }
-            catch (Exception e)
-            {
-                MyLog.Default.Error($"[Grid Garage] Failed on RemoveGridFromList\n{e.ToString()}");
-            }
         }
 
         private void StartSpectatorView()
@@ -221,25 +183,9 @@ namespace GridStorage
                     gsb.GridsToPlace = null;
                     gsb.CubeGridsToPlace = null;
 
-                    if (MyAPIGateway.Multiplayer.IsServer)
+                    if (gsb.SelectedPrefab != null)
                     {
-                        Prefab fab = Core.LoadPrefab(gsb.Entity.EntityId, gsb.Id.Value, gsb.SelectedGrid);
-
-                        if (fab != null)
-                        {
-                            gsb.GridsToPlace = fab.UnpackGrids();
-                        }
-                    }
-                    else
-                    {
-                        PreviewGridData data = new PreviewGridData()
-                        {
-                            GarageEntityId = gsb.Entity.EntityId,
-                            GarageGuid = gsb.Id.Value,
-                            GridName = gsb.SelectedGrid
-                        };
-
-                        Network.SendCommand(Core.Command_Preview, null, MyAPIGateway.Utilities.SerializeToBinary(data));
+                        gsb.GridsToPlace = gsb.SelectedPrefab.UnpackGrids();
                     }
 
                     gsb.GridSelectionMode = false;
@@ -265,7 +211,7 @@ namespace GridStorage
 
                 // bind camera to a 1000m sphere
                 Vector3D gridToCamera = (Grid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
-                if (gridToCamera.LengthSquared() > Core.Config.CameraOrbitDistance*Core.Config.CameraOrbitDistance)
+                if (gridToCamera.LengthSquared() > Core.Config.CameraOrbitDistance * Core.Config.CameraOrbitDistance)
                 {
                     CancelSpectorView();
                 }
@@ -324,9 +270,9 @@ namespace GridStorage
                 {
                     bool isValid = true;
 
-                    if ((DateTime.Now - StorageCooldown.Value).TotalSeconds < Core.Config.StorageCooldown)
+                    if ((DateTime.UtcNow - StorageCooldown.Value).TotalSeconds < Core.Config.StorageCooldown)
                     {
-                        GridSelectErrorMessage = $"Storage is on Cooldown: {(Core.Config.StorageCooldown - ((DateTime.Now - StorageCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds";
+                        GridSelectErrorMessage = $"Storage is on Cooldown: {(Core.Config.StorageCooldown - ((DateTime.UtcNow - StorageCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds";
                         isValid = false;
                     }
 
@@ -386,19 +332,17 @@ namespace GridStorage
                         {
                             if (SelectedGridEntity != null)
                             {
-                                string name = Core.SavePrefab(SelectedGridEntity.EntityId, Id.Value);
-                                GridList.Value.Add(name);
-                                GridList.Push();
+                                StorePrefab(SelectedGridEntity);
                             }
                         }
                         else
                         {
-                            StoreGridData data = new StoreGridData() { GarageEntityId = Entity.EntityId, GarageGuid = Id.Value, TargetId = SelectedGridEntity.EntityId };
+                            StoreGridData data = new StoreGridData() { GarageId = Entity.EntityId, TargetId = SelectedGridEntity.EntityId };
 
                             Network.SendCommand(Core.Command_Store, data: MyAPIGateway.Utilities.SerializeToBinary(data));
                         }
 
-                        StorageCooldown.Value = DateTime.Now;
+                        StorageCooldown.Value = DateTime.UtcNow;
                     }
                 }
             }
@@ -445,9 +389,9 @@ namespace GridStorage
                 // validate grid placement position
                 bool isValid = true;
 
-                if ((DateTime.Now - SpawnCooldown.Value).TotalSeconds < Core.Config.SpawnCooldown) 
+                if ((DateTime.UtcNow - SpawnCooldown.Value).TotalSeconds < Core.Config.SpawnCooldown)
                 {
-                    MyAPIGateway.Utilities.ShowNotification($"Spawn is on Cooldown: {(Core.Config.SpawnCooldown - ((DateTime.Now - SpawnCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds", 1, "Red");
+                    MyAPIGateway.Utilities.ShowNotification($"Spawn is on Cooldown: {(Core.Config.SpawnCooldown - ((DateTime.UtcNow - SpawnCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds", 1, "Red");
                     isValid = false;
                 }
 
@@ -586,15 +530,15 @@ namespace GridStorage
 
                     if (MyAPIGateway.Multiplayer.IsServer)
                     {
-                        Core.PlacePrefab(GridsToPlace, matrix.Translation, Tools.CreateFilename(Id.Value, SelectedGrid), playerId);
-                        RemoveGridFromList(SelectedGrid);
+                        PlacePrefab(SelectedPrefab, matrix.Translation, playerId);
                     }
                     else
                     {
                         PlaceGridData data = new PlaceGridData()
                         {
-                            GarageGuid = Id.Value,
-                            GridName = SelectedGrid,
+                            GarageId = Entity.EntityId,
+                            GridIndex = GridList.Value.IndexOf(SelectedPrefab),
+                            GridName = SelectedPrefab.Name,
                             NewOwner = playerId,
                             Position = new SerializableVector3D(matrix.Translation)
                         };
@@ -602,7 +546,7 @@ namespace GridStorage
                         Network.SendCommand(Core.Command_Place, null, MyAPIGateway.Utilities.SerializeToBinary(data));
                     }
 
-                    SpawnCooldown.Value = DateTime.Now;
+                    SpawnCooldown.Value = DateTime.UtcNow;
 
                     ResetView();
                 }
@@ -691,21 +635,19 @@ namespace GridStorage
         {
             MyLog.Default.Info("[Grid Garage] Creating controls");
 
-            IdLabel = Tools.CreateControlLabel("GridStorage_Label", $"Garage ID: {Id.Value}", ControlsVisible_Basic, ControlsEnabled_Basic);
-
             Tools.CreateControlButton("GridStorage_Store", "Store Grid", "Lets you select a grid to store", ControlsVisible_Basic, ControlsEnabled_Basic, StoreSelectedGridAction);
 
             Tools.CreateControlListbox("GridStorage_GridList", "Grid List", "Select a grid to spawn", 8, ControlsVisible_Basic, ControlsEnabled_Basic,
             (block, items, selected) =>
             {
-                GridStorageBlock drive = block.GameLogic?.GetAs<GridStorageBlock>();
+                GridStorageBlock garage = block.GameLogic?.GetAs<GridStorageBlock>();
 
-                foreach (string filename in drive.GridList.Value)
+                foreach (Prefab fab in garage.GridList.Value)
                 {
-                    MyTerminalControlListBoxItem listItem = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(filename), MyStringId.GetOrCompute(""), filename);
+                    MyTerminalControlListBoxItem listItem = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(fab.Name), MyStringId.GetOrCompute(""), fab);
                     items.Add(listItem);
 
-                    if (drive.SelectedGrid == filename)
+                    if (garage.SelectedPrefab == fab)
                     {
                         selected.Add(listItem);
                     }
@@ -716,7 +658,7 @@ namespace GridStorage
 
                 GridStorageBlock drive = block.GameLogic?.GetAs<GridStorageBlock>();
 
-                drive.SelectedGrid = (string)items[0].UserData;
+                drive.SelectedPrefab = (Prefab)items[0].UserData;
             });
 
             Tools.CreateControlButton("GridStorage_Spawn", "Spawn Grid", "Spawns the grid selected in the listbox", ControlsVisible_Basic, ControlsEnabled_Basic, SpawnSelectedGridAction);
@@ -735,8 +677,116 @@ namespace GridStorage
 
         #endregion
 
+        public void StorePrefab(long gridId) 
+        {
+            StorePrefab(MyAPIGateway.Entities.GetEntityById(gridId) as IMyCubeGrid);
+        }
+
+        public void StorePrefab(IMyCubeGrid grid)
+        {
+            try
+            {
+                // create prefab from parent and subgrids
+                Prefab prefab = new Prefab();
+                prefab.Name = grid.DisplayName;
+                // forced into doing strings cause the dumb serializer is erroring out otherwise.
+                prefab.Grids.Add(MyAPIGateway.Utilities.SerializeToXML((MyObjectBuilder_CubeGrid)grid.GetObjectBuilder()));
+
+                List<IMyCubeGrid> grids = MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical);
+                grids.Remove(grid);
+
+                for (int i = 0; i < grids.Count; i++)
+                {
+                    prefab.Grids.Add(MyAPIGateway.Utilities.SerializeToXML((MyObjectBuilder_CubeGrid)grids[i].GetObjectBuilder()));
+                }
+
+                // GridList is saved when the game is.
+                GridList.Value.Add(prefab);
+                GridList.Push();
+
+                // remove existing grid from world
+                MyAPIGateway.Entities.MarkForClose(grid);
+                foreach (IMyCubeGrid subs in grids)
+                {
+                    MyAPIGateway.Entities.MarkForClose(subs);
+                }
+            }
+            catch (Exception e) 
+            {
+                MyLog.Default.Error($"[Grid Garage] Failed to save grid prefab:\n{e.ToString()}");
+            }
+        }
+
+        public void PlacePrefab(int prefabIndex, string prefabName, Vector3D position, long ownerId) 
+        {
+            try 
+            {
+                Prefab fab = GridList.Value[prefabIndex];
+
+                if (fab.Name == prefabName) 
+                {
+                    PlacePrefab(fab, position, ownerId);
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Error($"[Grid Garage] Error in function PlacePrefab: {e.ToString()}");
+            }
+        }
+
+        public void PlacePrefab(Prefab fab, Vector3D position, long ownerId) 
+        {
+            try
+            {
+                List<MyObjectBuilder_CubeGrid> grids = fab.UnpackGrids();
+
+                MyLog.Default.Info($"[Grid Garage] Spawning grid: {fab.Name}");
+
+                if (grids == null || grids.Count == 0)
+                {
+                    return;
+                }
+
+                MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
+                foreach (MyObjectBuilder_CubeGrid grid in grids)
+                {
+                    grid.AngularVelocity = new SerializableVector3();
+                    grid.LinearVelocity = new SerializableVector3();
+                    grid.XMirroxPlane = null;
+                    grid.YMirroxPlane = null;
+                    grid.ZMirroxPlane = null;
+                    grid.IsStatic = false;
+                    grid.CreatePhysics = true;
+                    grid.IsRespawnGrid = false;
+                }
+
+                Vector3D parentPosition = grids[0].PositionAndOrientation.Value.Position;
+
+                foreach (MyObjectBuilder_CubeGrid grid in grids)
+                {
+                    Vector3D offset = parentPosition - grid.PositionAndOrientation.Value.Position;
+                    grid.PositionAndOrientation = new MyPositionAndOrientation((position - offset), grid.PositionAndOrientation.Value.Forward, grid.PositionAndOrientation.Value.Up);
+
+                    foreach (MyObjectBuilder_CubeBlock cubeBlock in grid.CubeBlocks)
+                    {
+                        cubeBlock.Owner = ownerId;
+                    }
+
+                    MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
+                    childGrid.Render.Visible = true;
+                }
+
+                GridList.Value.Remove(fab);
+                GridList.Push();
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Error($"[Grid Garage] Failed to spawn grid:\n{e.ToString()}");
+            }
+        }
+
         /// <summary>
-        /// Save grid list to world save file
+        /// Save prefab list to world file
         /// </summary>
         private void Save()
         {
@@ -744,13 +794,12 @@ namespace GridStorage
             {
                 MyModStorageComponentBase storage = GetStorage(Entity);
 
-                StorageDescription desc = new StorageDescription()
+                StorageData desc = new StorageData()
                 {
-                    Id = Id.Value,
-                    GridNames = GridList.Value
+                    StoredGrids = GridList.Value
                 };
 
-                string output = BitConverter.ToString(MyAPIGateway.Utilities.SerializeToBinary(desc));
+                string output = BitConverter.ToString(MyAPIGateway.Utilities.SerializeToBinary(desc)).Replace("-", "");
 
                 if (storage.ContainsKey(StorageGuid))
                 {
@@ -770,7 +819,7 @@ namespace GridStorage
         }
 
         /// <summary>
-        /// Load grid list from world save file
+        /// Load prefab list from world file
         /// </summary>
         private void Load()
         {
@@ -780,45 +829,50 @@ namespace GridStorage
 
                 if (storage.ContainsKey(StorageGuid))
                 {
-                    StorageDescription data;
+                    StorageData data;
                     try
                     {
-                        string hex = storage[StorageGuid].Replace("-", "");
+                        string hex = storage[StorageGuid];
                         byte[] raw = new byte[hex.Length / 2];
                         for (int i = 0; i < raw.Length; i++)
                         {
                             raw[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
                         }
 
-                        data = MyAPIGateway.Utilities.SerializeFromBinary<StorageDescription>(raw);
+                        data = MyAPIGateway.Utilities.SerializeFromBinary<StorageData>(raw);
                     }
                     catch (Exception e)
                     {
                         MyLog.Default.Warning($"[Grid Garage] Failed to load block details. Checking depricated storage method");
 
                         string[] splitNames = storage[StorageGuid].Split(new string[] { "||//||" }, StringSplitOptions.RemoveEmptyEntries);
-                        data = new StorageDescription()
+
+                        data = new StorageData()
                         {
-                            Id = Id.Value,
-                            GridNames = new List<string>(splitNames)
+                            StoredGrids = new List<Prefab>()
                         };
+
+                        foreach (string name in splitNames) 
+                        {
+                            string oldFilenameFormat = Tools.CreateDepricatedFilename(Entity.EntityId, name);
+                            try
+                            {
+                                TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(oldFilenameFormat, typeof(Prefab));
+                                string text = reader.ReadToEnd();
+                                reader.Close();
+
+                                Prefab fab = MyAPIGateway.Utilities.SerializeFromXML<Prefab>(text);
+                                fab.Name = name;
+                                data.StoredGrids.Add(fab);
+                            }
+                            catch (Exception err)
+                            {
+                                MyLog.Default.Info($"[Grid Garage] Warning problem loading: {oldFilenameFormat}\n{err.ToString()}");
+                            }
+                        }
                     }
 
-                    if (string.IsNullOrEmpty(data.Id) || string.IsNullOrWhiteSpace(data.Id))
-                    {
-                        Id.SetValue(Guid.NewGuid().ToString(), SyncType.None);
-                        ConvertToNewSystem(data.GridNames);
-                        MyLog.Default.Info($"[Grid Garage] Assigning new Garage Id: {Id.Value}");
-                    }
-                    else 
-                    {
-                        Id.SetValue(data.Id, SyncType.None);
-                        MyLog.Default.Info($"[Grid Garage] Garage Id: {Id.Value}");
-                    }
-
-                    GridList.SetValue(data.GridNames, SyncType.None);
-
-                    MyLog.Default.Info($"[Grid Garage] Data loaded: {GridList.Value.Count} grids");
+                    GridList.SetValue(data.StoredGrids, SyncType.None);
                 }
                 else
                 {
@@ -830,45 +884,6 @@ namespace GridStorage
                 MyLog.Default.Error($"[Grid Garage] Loading Error: {e.ToString()}");
             }
         }
-
-
-        private void ConvertToNewSystem(List<string> gridnames)
-        {
-            FileIndex fileIndex = FileIndex.GetFileIndex();
-            foreach (string name in gridnames) 
-            {
-                string oldFilenameFormat = Tools.CreateDepricatedFilename(Entity.EntityId, name);
-                string newFilenameFormat = Tools.CreateFilename(Id.Value, name);
-                try
-                {
-                    TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(oldFilenameFormat, typeof(Prefab));
-                    string text = reader.ReadToEnd();
-                    reader.Close();
-
-                    TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage(newFilenameFormat, typeof(Prefab));
-                    writer.Write(text);
-                    writer.Close();
-
-                    // this can be removed when keen fixes their bug
-                    writer = MyAPIGateway.Utilities.WriteFileInLocalStorage(newFilenameFormat, typeof(Prefab));
-                    writer.Write("");
-                    writer.Close();
-
-                    fileIndex.FileNames.Add(newFilenameFormat);
-
-                    MyAPIGateway.Utilities.DeleteFileInWorldStorage(oldFilenameFormat, typeof(Prefab));
-                    MyAPIGateway.Utilities.DeleteFileInLocalStorage(oldFilenameFormat, typeof(Prefab));
-
-                } 
-                catch (Exception e) 
-                {
-                    MyLog.Default.Error($"[Grid Garage] failed to convert grid {name} to the new storage method:\n{e.ToString()}");
-                }
-            }
-
-            fileIndex.Save();
-        }
-
 
         /// <summary>
         /// Ensures the entities storage component exists for saving reasons
