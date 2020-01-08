@@ -9,7 +9,7 @@ namespace GridStorage
 {
 	public enum NetworkCommands { BlockPropertiesUpdate };
 
-	[MySessionComponentDescriptor(MyUpdateOrder.NoUpdate)]
+	[MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
 	public class Core : MySessionComponentBase
 	{
 		public static NetworkAPI Network => NetworkAPI.Instance;
@@ -23,6 +23,7 @@ namespace GridStorage
 		public const string Command_Settings = "settings";
 
 		public int waitInterval = 0;
+		bool SettingsUpdated = false;
 
 		private static DateTime storeTime = DateTime.MinValue;
 		private static DateTime placementTime = DateTime.MinValue;
@@ -40,6 +41,7 @@ namespace GridStorage
 
 			if (MyAPIGateway.Multiplayer.IsServer)
 			{
+				SettingsUpdated = true;
 				Config = Settings.Load();
 				Network.RegisterNetworkCommand(Command_Store, Store_Server);
 				Network.RegisterNetworkCommand(Command_Place, Place_Server);
@@ -48,15 +50,18 @@ namespace GridStorage
 			}
 			else
 			{
-				SetUpdateOrder(MyUpdateOrder.BeforeSimulation);
 				Config = Settings.GetDefaults();
 				Network.RegisterNetworkCommand(Command_Settings, Settings_Client);
 				Network.RegisterNetworkCommand(Command_Error, Error_Client);
 			}
 		}
 
+
+
 		public override void UpdateBeforeSimulation()
 		{
+			if (SettingsUpdated) return;
+
 			waitInterval++;
 
 			if (waitInterval == 120) 
@@ -151,7 +156,6 @@ namespace GridStorage
 			try
 			{
 				Config = MyAPIGateway.Utilities.SerializeFromBinary<Settings>(data);
-				SetUpdateOrder(MyUpdateOrder.NoUpdate);
 			}
 			catch (Exception e)
 			{

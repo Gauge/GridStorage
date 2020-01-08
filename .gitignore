@@ -2,3 +2,8 @@
 bin/
 obj/
 *.sln
+GridStorageFilesToBlueprint/GridStorageFilesToBlueprint.csproj
+GridStorageFilesToBlueprint/GridStorageFilesToBlueprint.csproj.user
+GridStorageFilesToBlueprint/Properties/PublishProfiles/FolderProfile.pubxml
+GridStorageFilesToBlueprint/Properties/PublishProfiles/FolderProfile.pubxml.user
+GridStorageFilesToBlueprint/Program.cs
