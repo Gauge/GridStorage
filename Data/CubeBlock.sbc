@@ -7,13 +7,13 @@
         <SubtypeId>GridStorageBlock</SubtypeId>
       </Id>
       <DisplayName>Grid Garage</DisplayName>
-      <Icon>Textures\GUI\Icons\Cubes\Projector.dds</Icon>
+      <Icon>Textures\GUI\Icons\GarageBlock.dds</Icon>
       <Description>Stores and respawns grids</Description>
       <CubeSize>Large</CubeSize>
       <BlockTopology>TriangleMesh</BlockTopology>
       <Size x="1" y="1" z="1" />
       <ModelOffset x="0" y="0" z="0" />
-      <Model>Models\Cubes\Large\Projector.mwm</Model>
+      <Model>Models\Cubes\GarageStorage.mwm</Model>
       <Components>
         <Component Subtype="SteelPlate" Count="11" />
         <Component Subtype="Construction" Count="4" />
@@ -29,20 +29,22 @@
         <MountPoint Side="Front" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
         <MountPoint Side="Left" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
         <MountPoint Side="Right" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
-        <MountPoint Side="Top" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
       </MountPoints>
       <BuildProgressModels>
-        <Model BuildPercentUpperBound="0.33" File="Models\Cubes\Large\ProjectorConstruction_1.mwm" />
-        <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\ProjectorConstruction_2.mwm" />
-        <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\ProjectorConstruction_3.mwm" />
+        <Model BuildPercentUpperBound="0.33" File="Models\Cubes\GarageStorage_Constr1.mwm" />
       </BuildProgressModels>
       <BlockPairName>GridGarage</BlockPairName>
       <BuildTimeSeconds>20</BuildTimeSeconds>
       <MirroringX>Z</MirroringX>
       <MirroringZ>X</MirroringZ>
       <EdgeType>Light</EdgeType>
-      <Upgrades>
-      </Upgrades>
+	  <ScreenAreas>
+        <ScreenArea Name="CockpitScreen_01" DisplayName="DisplayName_Screen_Large" TextureResolution="256" ScreenWidth="16" ScreenHeight="11" />
+        <ScreenArea Name="CockpitScreen_02" DisplayName="DisplayName_Screen_ProjectionArea" TextureResolution="512" ScreenWidth="2" ScreenHeight="1" />
+        <ScreenArea Name="CockpitScreen_03" DisplayName="DisplayName_Screen_Large" TextureResolution="256" ScreenWidth="16" ScreenHeight="11" />
+        <ScreenArea Name="CockpitScreen_04" DisplayName="DisplayName_Screen_ProjectionArea" TextureResolution="512" ScreenWidth="2" ScreenHeight="1" />
+      </ScreenAreas>
+      <PCU>50</PCU>  
       <PrimarySound>BlockModuleProductivity</PrimarySound>
       <DamageEffectName>Damage_Electrical_Damaged</DamageEffectName>
       <DamagedSound>ParticleElectrical</DamagedSound>

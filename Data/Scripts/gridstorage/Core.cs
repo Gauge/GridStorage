@@ -156,6 +156,7 @@ namespace GridStorage
 			try
 			{
 				Config = MyAPIGateway.Utilities.SerializeFromBinary<Settings>(data);
+				SettingsUpdated = true;
 			}
 			catch (Exception e)
 			{
