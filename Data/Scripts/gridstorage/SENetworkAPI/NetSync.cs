@@ -40,6 +40,11 @@ namespace SENetworkAPI
 		public bool SyncOnLoad { get; internal set; }
 
 		/// <summary>
+		/// Limits sync updates to within sync distance
+		/// </summary>
+		public bool LimitToSyncDistance { get; internal set; }
+
+		/// <summary>
 		/// Request the lastest value from the server
 		/// </summary>
 		public abstract void Fetch();
@@ -88,18 +93,20 @@ namespace SENetworkAPI
 		/// A dynamically syncing object. Used best with block terminal properties
 		/// Make sure to initialize this as a class level variable
 		/// </summary>
-		public NetSync(MyNetworkAPIGameLogicComponent logic, TransferType transferType, T startingValue = default(T), bool enableSync = true)
+		public NetSync(MyNetworkAPIGameLogicComponent logic, TransferType transferType, T startingValue = default(T), bool enableSync = true, bool limitToSyncDistance = true)
 		{
 			LogicComponent = logic;
 			TransferType = transferType;
 			_value = startingValue;
 			SyncOnLoad = enableSync;
+			LimitToSyncDistance = limitToSyncDistance;
+
 
 			Id = logic.AddNetworkProperty(this);
 
 			if (NetworkAPI.LogNetworkTraffic)
 			{
-				MyLog.Default.Info($"[NetworkAPI] Property Created - ID: {Id} Type: {transferType.ToString()} Sync On Start: {SyncOnLoad} Logic Class: {logic.GetType().ToString()}");
+				MyLog.Default.Info($"[NetworkAPI] Property Created - ID: {Id}, Transfer: {transferType.ToString()}, SyncOnStart: {SyncOnLoad}, Type: {typeof(T).ToString()}, Class: {logic.GetType().ToString()}");
 			}
 
 		}
@@ -128,7 +135,7 @@ namespace SENetworkAPI
 					}
 				}
 				else if (TransferType == TransferType.Both)
-				{
+				{	
 					SendValue(syncType);
 				}
 
@@ -150,7 +157,7 @@ namespace SENetworkAPI
 
 					if (NetworkAPI.LogNetworkTraffic)
 					{
-						MyLog.Default.Info($"[NetworkAPI] <{LogicComponent.GetType().ToString()} - {Id}> New value: {_value} --- Old value: {_value}");
+						MyLog.Default.Info($"[NetworkAPI] <{LogicComponent.GetType().ToString()} - {Id}> New value: {val} --- Old value: {_value}");
 					}
 
 					ValueChanged?.Invoke(val, _value);
@@ -169,6 +176,8 @@ namespace SENetworkAPI
 		/// <param name="fetch"></param>
 		private void SendValue(SyncType syncType = SyncType.Broadcast, ulong sendTo = ulong.MinValue)
 		{
+			if (MyAPIGateway.Session.OnlineMode == MyOnlineModeEnum.OFFLINE)
+				return;
 
 			if (Value == null)
 			{
@@ -202,7 +211,20 @@ namespace SENetworkAPI
 
 			if (LogicComponent.Network != null)
 			{
-				LogicComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data) }, sendTo);
+				ulong id = ulong.MinValue;
+				if (MyAPIGateway.Session?.LocalHumanPlayer != null)
+				{
+					id = MyAPIGateway.Session.LocalHumanPlayer.SteamUserId;
+				}
+
+				if (LogicComponent.Entity != null)
+				{
+					LogicComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data), SteamId = id }, LogicComponent.Entity.GetPosition(), steamId: sendTo);
+				}
+				else
+				{
+					LogicComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data), SteamId = id }, sendTo);
+				}
 			}
 		}
 
@@ -221,7 +243,7 @@ namespace SENetworkAPI
 
 				if (NetworkAPI.LogNetworkTraffic)
 				{
-					MyLog.Default.Info($"[NetworkAPI] Received {pack.SyncType.ToString()} request");
+					MyLog.Default.Info($"[NetworkAPI] Transmission type: {pack.SyncType.ToString()}");
 				}
 
 				IMyEntity entity = MyAPIGateway.Entities.GetEntityById(pack.EntityId);
@@ -332,7 +354,7 @@ namespace SENetworkAPI
 
 		public MyNetworkAPIGameLogicComponent()
 		{
-			if (!MyAPIGateway.Session.IsServer)
+			if (!MyAPIGateway.Multiplayer.IsServer)
 				SessionReadyCheck();
 		}
 
@@ -343,7 +365,7 @@ namespace SENetworkAPI
 		{
 			base.OnAddedToScene();
 
-			if (!MyAPIGateway.Session.IsServer && SessionReadyCheck())
+			if (!MyAPIGateway.Multiplayer.IsServer && SessionReadyCheck())
 			{
 				SyncOnLoad();
 			}

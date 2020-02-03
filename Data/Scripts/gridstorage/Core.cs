@@ -21,6 +21,7 @@ namespace GridStorage
 		public const string Command_Store = "store";
 		public const string Command_Place = "place";
 		public const string Command_Settings = "settings";
+		public const string Command_Preview = "preview";
 
 		public int waitInterval = 0;
 		bool SettingsUpdated = false;
@@ -46,6 +47,7 @@ namespace GridStorage
 				Network.RegisterNetworkCommand(Command_Store, Store_Server);
 				Network.RegisterNetworkCommand(Command_Place, Place_Server);
 				Network.RegisterNetworkCommand(Command_Settings, Settings_Server);
+				Network.RegisterNetworkCommand(Command_Preview, Preview_Server);
 
 			}
 			else
@@ -53,6 +55,7 @@ namespace GridStorage
 				Config = Settings.GetDefaults();
 				Network.RegisterNetworkCommand(Command_Settings, Settings_Client);
 				Network.RegisterNetworkCommand(Command_Error, Error_Client);
+				Network.RegisterNetworkCommand(Command_Preview, Preview_Client);
 			}
 		}
 
@@ -60,11 +63,12 @@ namespace GridStorage
 
 		public override void UpdateBeforeSimulation()
 		{
-			if (SettingsUpdated) return;
+			if (SettingsUpdated)
+				return;
 
 			waitInterval++;
 
-			if (waitInterval == 120) 
+			if (waitInterval == 120)
 			{
 				MyLog.Default.Info($"[Grid Garage] requesting server config file");
 				Network.SendCommand(Command_Settings);
@@ -75,13 +79,32 @@ namespace GridStorage
 
 		private void Settings_Server(ulong steamId, string command, byte[] data, DateTime timestamp)
 		{
-			try 
+			try
 			{
 				Network.SendCommand(Command_Settings, null, MyAPIGateway.Utilities.SerializeToBinary(Config), steamId: steamId);
 			}
 			catch (Exception e)
 			{
 				MyLog.Default.Error($"[Grid Garage] Error in function Settings_Server: {e.ToString()}");
+			}
+		}
+
+		private void Preview_Server(ulong steamId, string command, byte[] data, DateTime timestamp)
+		{
+			try
+			{
+				PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
+				GridStorageBlock block = MyAPIGateway.Entities.GetEntityById(preview.GarageId).GameLogic.GetAs<GridStorageBlock>();
+
+				if (preview.Index > -1 && preview.Index < block.GridList.Count)
+				{
+					preview.Prefab = block.GridList[preview.Index];
+					Network.SendCommand(Command_Preview, data: MyAPIGateway.Utilities.SerializeToBinary(preview), steamId: steamId);
+				}
+			}
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Error in function Preview_Server: {e.ToString()}");
 			}
 		}
 
@@ -136,7 +159,7 @@ namespace GridStorage
 			}
 		}
 
-		private void Error_Client(ulong steamId, string command, byte[] data, DateTime timestamp) 
+		private void Error_Client(ulong steamId, string command, byte[] data, DateTime timestamp)
 		{
 			try
 			{
@@ -145,13 +168,13 @@ namespace GridStorage
 				MyAPIGateway.Utilities.ShowNotification(message, 2000, "Red");
 
 			}
-			catch (Exception e) 
+			catch (Exception e)
 			{
 				MyLog.Default.Error($"[Grid Garage] Error in function Error_Client: {e.ToString()}");
 			}
 		}
 
-		private void Settings_Client(ulong steamId, string command, byte[] data, DateTime timestamp) 
+		private void Settings_Client(ulong steamId, string command, byte[] data, DateTime timestamp)
 		{
 			try
 			{
@@ -161,6 +184,20 @@ namespace GridStorage
 			catch (Exception e)
 			{
 				MyLog.Default.Error($"[Grid Garage] Error in function Settings_Client: {e.ToString()}");
+			}
+		}
+
+		private void Preview_Client(ulong steamId, string command, byte[] data, DateTime timestamp)
+		{
+			try
+			{
+				PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
+				GridStorageBlock block = MyAPIGateway.Entities.GetEntityById(preview.GarageId).GameLogic.GetAs<GridStorageBlock>();
+				block.GridsToPlace = preview.Prefab.UnpackGrids();
+			}
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Error in function Preview_Client: {e.ToString()}");
 			}
 		}
 

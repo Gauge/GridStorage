@@ -54,6 +54,20 @@ namespace GridStorage
 	}
 
 	[ProtoContract]
+	public class PreviewGridData
+	{
+		[ProtoMember(1)]
+		public long GarageId;
+
+		[ProtoMember(2)]
+		public int Index;
+
+		[ProtoMember(3)]
+		public Prefab Prefab;
+	}
+
+
+	[ProtoContract]
 	public class PlaceGridData
 	{
 		[ProtoMember(1)]
