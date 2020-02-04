@@ -32,7 +32,6 @@ namespace GridStorage
 
 		public NetSync<List<string>> GridNames;
 		public NetSync<bool> DisplayHologram;
-		//public NetSync<int> HologramIndex;
 		private NetSync<DateTime> StorageCooldown;
 		private NetSync<DateTime> SpawnCooldown;
 
@@ -64,7 +63,6 @@ namespace GridStorage
 				CubeBlock = (MyCubeBlock)ModBlock;
 
 				GridNames = new NetSync<List<string>>(this, TransferType.ServerToClient, new List<string>());
-				//HologramIndex = new NetSync<int>(this, TransferType.Both, -1);
 				DisplayHologram = new NetSync<bool>(this, TransferType.Both, false);
 				StorageCooldown = new NetSync<DateTime>(this, TransferType.Both, DateTime.MinValue);
 				SpawnCooldown = new NetSync<DateTime>(this, TransferType.Both, DateTime.MinValue);
@@ -724,8 +722,7 @@ namespace GridStorage
 
 				// GridList is saved when the game is.
 				GridList.Add(prefab);
-				GridNames.Value.Add(prefab.Name);
-				GridNames.Push();
+				UpdateGridNames();
 
 				// remove existing grid from world
 				MyAPIGateway.Entities.MarkForClose(grid);
@@ -801,8 +798,7 @@ namespace GridStorage
 				}
 
 				GridList.Remove(fab);
-				GridNames.Value.Remove(fab.Name);
-				GridNames.Push();
+				UpdateGridNames();
 			}
 			catch (Exception e)
 			{
@@ -895,14 +891,7 @@ namespace GridStorage
 						}
 					}
 					GridList = data.StoredGrids;
-
-					GridNames.Value.Clear();
-					for (int i = 0; i < GridList.Count; i++)
-					{
-						GridNames.Value.Add(GridList[i].Name);
-					}
-
-					GridNames.Push();
+					UpdateGridNames();
 				}
 				else
 				{
@@ -913,6 +902,16 @@ namespace GridStorage
 			{
 				MyLog.Default.Error($"[Grid Garage] Loading Error: {e.ToString()}");
 			}
+		}
+
+		private void UpdateGridNames() 
+		{
+			GridNames.Value.Clear();
+			for (int i = 0; i < GridList.Count; i++)
+			{
+				GridNames.Value.Add(GridList[i].Name);
+			}
+			GridNames.Push();
 		}
 
 		public static bool GridHasNonFactionOwners(IMyCubeGrid grid)
