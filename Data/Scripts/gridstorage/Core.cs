@@ -89,6 +89,27 @@ namespace GridStorage
 			}
 		}
 
+
+		private void Settings_Client(ulong steamId, string command, byte[] data, DateTime timestamp)
+		{
+			try
+			{
+				Config = MyAPIGateway.Utilities.SerializeFromBinary<Settings>(data);
+				SettingsUpdated = true;
+
+				if (NetworkAPI.LogNetworkTraffic)
+				{
+					MyLog.Default.Info($"Recived Config, Spawn: {Config.SpawnCooldown}, Storage: {Config.StorageCooldown}");
+				}
+
+			}
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Error in function Settings_Client: {e.ToString()}");
+			}
+		}
+
+
 		private void Preview_Server(ulong steamId, string command, byte[] data, DateTime timestamp)
 		{
 			try
@@ -171,19 +192,6 @@ namespace GridStorage
 			catch (Exception e)
 			{
 				MyLog.Default.Error($"[Grid Garage] Error in function Error_Client: {e.ToString()}");
-			}
-		}
-
-		private void Settings_Client(ulong steamId, string command, byte[] data, DateTime timestamp)
-		{
-			try
-			{
-				Config = MyAPIGateway.Utilities.SerializeFromBinary<Settings>(data);
-				SettingsUpdated = true;
-			}
-			catch (Exception e)
-			{
-				MyLog.Default.Error($"[Grid Garage] Error in function Settings_Client: {e.ToString()}");
 			}
 		}
 

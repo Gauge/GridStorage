@@ -26,7 +26,7 @@ namespace GridStorage
 
 		private static readonly Guid StorageGuid = new Guid("19906e82-9e21-458d-8f02-7bf7030ed604");
 
-		public IMyCubeGrid Grid;
+		public MyCubeGrid Grid;
 		public IMyTerminalBlock ModBlock;
 		public MyCubeBlock CubeBlock;
 
@@ -59,7 +59,7 @@ namespace GridStorage
 				base.Init(objectBuilder);
 
 				ModBlock = Entity as IMyTerminalBlock;
-				Grid = ModBlock.CubeGrid;
+				Grid = (MyCubeGrid)ModBlock.CubeGrid;
 				CubeBlock = (MyCubeBlock)ModBlock;
 
 				GridNames = new NetSync<List<string>>(this, TransferType.ServerToClient, new List<string>());
@@ -72,7 +72,11 @@ namespace GridStorage
 					Load();
 				}
 			}
-			catch (Exception e) { MyLog.Default.Error($"[Grid Garage] Failed on Init\n{e.ToString()}"); }
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on Init\n{e.ToString()}");
+			}
+
 			NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
 		}
 
@@ -123,7 +127,9 @@ namespace GridStorage
 				ResetView();
 			}
 			catch (Exception e)
-			{ MyLog.Default.Error($"[Grid Garage] Failed on CancelSpectorView\n{e.ToString()}"); }
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on CancelSpectorView\n{e.ToString()}");
+			}
 		}
 
 		private void ResetView()
@@ -210,7 +216,9 @@ namespace GridStorage
 				}
 			}
 			catch (Exception e)
-			{ MyLog.Default.Error($"[Grid Garage] Failed on SpawnSelectedGridAction\n{e.ToString()}"); }
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on SpawnSelectedGridAction\n{e.ToString()}");
+			}
 		}
 
 		/// <summary>
@@ -227,7 +235,7 @@ namespace GridStorage
 				}
 
 				// bind camera to a 1000m sphere
-				Vector3D gridToCamera = (Grid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
+				Vector3D gridToCamera = (ModBlock.CubeGrid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
 				if (gridToCamera.LengthSquared() > Core.Config.CameraOrbitDistance * Core.Config.CameraOrbitDistance)
 				{
 					CancelSpectorView();
@@ -259,7 +267,10 @@ namespace GridStorage
 					GridPlacement(buttons);
 				}
 			}
-			catch (Exception e) { MyLog.Default.Error($"[Grid Garage] Failed on UpdateBeforeSimulation\n{e.ToString()}"); }
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on UpdateBeforeSimulation\n{e.ToString()}");
+			}
 		}
 
 		private void GridSelect(List<MyMouseButtonsEnum> buttons)
@@ -363,7 +374,11 @@ namespace GridStorage
 					}
 				}
 			}
-			catch (Exception e) { MyLog.Default.Error($"[Grid Garage] Failed on GridSelect\n{e.ToString()}"); ResetView(); }
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on GridSelect\n{e.ToString()}");
+				ResetView();
+			}
 		}
 
 		private void GridPlacement(List<MyMouseButtonsEnum> buttons)
@@ -568,7 +583,11 @@ namespace GridStorage
 					ResetView();
 				}
 			}
-			catch (Exception e) { MyLog.Default.Error($"[Grid Garage] Failed on GridPlacement\n{e.ToString()}"); ResetView(); }
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on GridPlacement\n{e.ToString()}");
+				ResetView();
+			}
 		}
 
 		private List<MyCubeGrid> CreateGridProjection(List<MyObjectBuilder_CubeGrid> grids)
@@ -604,7 +623,11 @@ namespace GridStorage
 
 				return cubeGrids;
 			}
-			catch (Exception e) { MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}"); return null; }
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}");
+				return null;
+			}
 		}
 
 		private static void ShowHideBoundingBoxGridGroup(IMyCubeGrid grid, bool enabled, Vector4? color = null)
@@ -617,7 +640,10 @@ namespace GridStorage
 					MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(sub, enabled, color, GridSelectLineSize);
 				}
 			}
-			catch (Exception e) { MyLog.Default.Error($"[Grid Garage] Failed on ShowHideBoundingBoxGridGroup\n{e.ToString()}"); }
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on ShowHideBoundingBoxGridGroup\n{e.ToString()}");
+			}
 		}
 
 		#region create controls
@@ -661,7 +687,7 @@ namespace GridStorage
 				if (garage == null)
 					return;
 
-				for (int i=0; i<garage.GridNames.Value.Count; i++)
+				for (int i = 0; i < garage.GridNames.Value.Count; i++)
 				{
 					string name = garage.GridNames.Value[i];
 					MyTerminalControlListBoxItem listItem = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(name), MyStringId.GetOrCompute(""), i);
@@ -819,18 +845,18 @@ namespace GridStorage
 					StoredGrids = GridList
 				};
 
-				string output = BitConverter.ToString(MyAPIGateway.Utilities.SerializeToBinary(desc)).Replace("-", "");
+				string output = BitConverter.ToString(MyCompression.Compress(MyAPIGateway.Utilities.SerializeToBinary(desc))).Replace("-", "");
 
 				if (storage.ContainsKey(StorageGuid))
 				{
 					storage[StorageGuid] = output;
-					//MyLog.Default.Info($"[Grid Garage] Data Saved");
 				}
 				else
 				{
-					MyLog.Default.Info($"[Grid Garage] {Entity.EntityId}: Saved new data");
 					storage.Add(new KeyValuePair<Guid, string>(StorageGuid, output));
 				}
+
+				MyLog.Default.Info($"[GridGarage] {Entity.EntityId}: Data Saved. Size: {output.Length}");
 			}
 			catch (Exception e)
 			{
@@ -846,50 +872,33 @@ namespace GridStorage
 			try
 			{
 				MyModStorageComponentBase storage = GetStorage(Entity);
-
 				if (storage.ContainsKey(StorageGuid))
 				{
+					// Remove stored grids if block is not fully built
+					if (ModBlock.SlimBlock.BuildLevelRatio <= 0.2f)
+					{
+						storage[StorageGuid] = string.Empty;
+					}
+
 					StorageData data;
+
+					string hex = storage[StorageGuid];
+					byte[] raw = new byte[hex.Length / 2];
+					for (int i = 0; i < raw.Length; i++)
+					{
+						raw[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+					}
+
 					try
 					{
-						string hex = storage[StorageGuid];
-						byte[] raw = new byte[hex.Length / 2];
-						for (int i = 0; i < raw.Length; i++)
-						{
-							raw[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
-						}
-
-						data = MyAPIGateway.Utilities.SerializeFromBinary<StorageData>(raw);
+						data = MyAPIGateway.Utilities.SerializeFromBinary<StorageData>(MyCompression.Decompress(raw));
 					}
 					catch (Exception e)
 					{
-						MyLog.Default.Warning($"[Grid Garage] Failed to load block details. Checking depricated storage method");
-
-						string[] splitNames = storage[StorageGuid].Split(new string[] { "||//||" }, StringSplitOptions.RemoveEmptyEntries);
-
-						data = new StorageData() {
-							StoredGrids = new List<Prefab>()
-						};
-
-						foreach (string name in splitNames)
-						{
-							string oldFilenameFormat = Tools.CreateDepricatedFilename(Entity.EntityId, name);
-							try
-							{
-								TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(oldFilenameFormat, typeof(Prefab));
-								string text = reader.ReadToEnd();
-								reader.Close();
-
-								Prefab fab = MyAPIGateway.Utilities.SerializeFromXML<Prefab>(text);
-								fab.Name = name;
-								data.StoredGrids.Add(fab);
-							}
-							catch (Exception err)
-							{
-								MyLog.Default.Info($"[Grid Garage] Warning problem loading: {oldFilenameFormat}\n{err.ToString()}");
-							}
-						}
+						MyLog.Default.Warning($"[Grid Garage] Failed to load block details. Trying non compression method");
+						data = MyAPIGateway.Utilities.SerializeFromBinary<StorageData>(raw);
 					}
+
 					GridList = data.StoredGrids;
 					UpdateGridNames();
 				}
@@ -904,13 +913,14 @@ namespace GridStorage
 			}
 		}
 
-		private void UpdateGridNames() 
+		private void UpdateGridNames()
 		{
 			GridNames.Value.Clear();
 			for (int i = 0; i < GridList.Count; i++)
 			{
 				GridNames.Value.Add(GridList[i].Name);
 			}
+
 			GridNames.Push();
 		}
 
@@ -929,7 +939,11 @@ namespace GridStorage
 				}
 				return false;
 			}
-			catch (Exception e) { MyLog.Default.Error($"[Grid Garage] Failed on GridHasNonFactionOwners\n{e.ToString()}"); return false; }
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on GridHasNonFactionOwners\n{e.ToString()}");
+				return false;
+			}
 		}
 
 		/// <summary>

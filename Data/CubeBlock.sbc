@@ -17,10 +17,10 @@
       <Components>
         <Component Subtype="SteelPlate" Count="11" />
         <Component Subtype="Construction" Count="4" />
+        <Component Subtype="Computer" Count="2" />
         <Component Subtype="LargeTube" Count="2" />
         <Component Subtype="Motor" Count="1" />
-        <Component Subtype="Computer" Count="2" />
-        <Component Subtype="SteelPlate" Count="10" />
+        <Component Subtype="SteelPlate" Count="20" />
       </Components>
       <CriticalComponent Subtype="Computer" Index="0" />
       <MountPoints>
@@ -34,7 +34,7 @@
         <Model BuildPercentUpperBound="0.33" File="Models\Cubes\GarageStorage_Constr1.mwm" />
       </BuildProgressModels>
       <BlockPairName>GridGarage</BlockPairName>
-      <BuildTimeSeconds>20</BuildTimeSeconds>
+      <BuildTimeSeconds>40</BuildTimeSeconds>
       <MirroringX>Z</MirroringX>
       <MirroringZ>X</MirroringZ>
       <EdgeType>Light</EdgeType>
