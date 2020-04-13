@@ -6,19 +6,19 @@ using VRage.Utils;
 
 namespace GridStorage
 {
-    [ProtoContract]
-    public class Settings
-    {
+	[ProtoContract]
+	public class Settings
+	{
 		public const string Filename = "settings.cfg";
 
 		[ProtoMember(1)]
 		public int Version;
 
-        [ProtoMember(2)]
-        public int StorageCooldown;
+		[ProtoMember(2)]
+		public int StorageCooldown;
 
-        [ProtoMember(3)]
-        public int SpawnCooldown;
+		[ProtoMember(3)]
+		public int SpawnCooldown;
 
 		[ProtoMember(4)]
 		public int CameraOrbitDistance;
@@ -26,15 +26,18 @@ namespace GridStorage
 		[ProtoMember(5)]
 		public int CameraPlacementDistance;
 
+		[ProtoMember(6)]
+		public int MaxGridCount;
+
 		public static Settings GetDefaults()
 		{
-			return new Settings
-			{
+			return new Settings {
 				Version = 1,
 				StorageCooldown = 30,
 				SpawnCooldown = 60,
 				CameraOrbitDistance = 1000,
-				CameraPlacementDistance = 500
+				CameraPlacementDistance = 500,
+				MaxGridCount = 0
 			};
 		}
 
@@ -55,7 +58,7 @@ namespace GridStorage
 
 					if (settings.Version != defaults.Version)
 					{
-						MyLog.Default.Info($"[Grid Garage] Old version updating config {settings.Version}->{GetDefaults().Version}");
+						MyLog.Default.Info($"[Grid Garage] Old version updating config {settings.Version}->{defaults.Version}");
 						settings = GetDefaults();
 						Save(settings);
 					}

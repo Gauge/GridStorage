@@ -322,6 +322,11 @@ namespace GridStorage
 								GridSelectErrorMessage = $"Cannot store static grids";
 								isValid = false;
 							}
+							else if (Core.Config.MaxGridCount != 0 && GridList.Count >= Core.Config.MaxGridCount)
+							{
+								GridSelectErrorMessage = $"Grid Garage is full. Maximum grid count: {Core.Config.MaxGridCount}";
+								isValid = false;
+							}
 							else if (grid.BigOwners.Count == 0)
 							{
 								GridSelectErrorMessage = $"Cannot store unowned grid";
