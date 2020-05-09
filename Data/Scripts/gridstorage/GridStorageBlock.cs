@@ -20,7 +20,7 @@ using VRageMath;
 namespace GridStorage
 {
 	[MyEntityComponentDescriptor(typeof(MyObjectBuilder_UpgradeModule), true, "GridStorageBlock")]
-	public class GridStorageBlock : MyNetworkAPIGameLogicComponent
+	public class GridStorageBlock : MyNetworkGameLogicComponent
 	{
 		public const float GridSelectLineSize = 0.2f;
 
