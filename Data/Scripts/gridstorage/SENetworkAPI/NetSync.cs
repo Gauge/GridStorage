@@ -1,4 +1,5 @@
 ﻿using ProtoBuf;
+using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using System;
 using System.Collections.Generic;
@@ -44,6 +45,10 @@ namespace SENetworkAPI
 		/// Limits sync updates to within sync distance
 		/// </summary>
 		public bool LimitToSyncDistance { get; internal set; }
+
+		public long LastMessageTimestamp { get; set; }
+
+		protected static List<MyNetworkSessionComponent> SessionComponents = new List<MyNetworkSessionComponent>();
 
 		/// <summary>
 		/// Request the lastest value from the server
@@ -94,7 +99,7 @@ namespace SENetworkAPI
 		private string componentType;
 
 		private int SessionComponentId;
-		private static List<MyNetworkSessionComponent> SessionComponents = new List<MyNetworkSessionComponent>();
+
 
 		/// <summary>
 		/// A dynamically syncing object. Used best with block terminal properties
@@ -119,18 +124,20 @@ namespace SENetworkAPI
 
 		}
 
-		public NetSync(MyNetworkSessionComponent session, TransferType transferType, T startingValue = default(T), bool enableSync = true, bool limitToSyncDistance = true)
+		public NetSync(MyNetworkSessionComponent session, TransferType transferType, T startingValue = default(T), bool enableSync = true)
 		{
 			SessionComponent = session;
 			TransferType = transferType;
 			_value = startingValue;
 			SyncOnLoad = enableSync;
-			LimitToSyncDistance = limitToSyncDistance;
+			LimitToSyncDistance = false;
 			componentType = session.GetType().ToString();
 
-			if (!SessionComponents.Contains(session))
+			SessionComponentId = SessionComponents.IndexOf(session);
+
+			if (SessionComponentId == -1)
 			{
-				SessionComponents.Add(SessionComponent);
+				SessionComponents.Add(session);
 				SessionComponentId = SessionComponents.Count - 1;
 			}
 
@@ -223,7 +230,7 @@ namespace SENetworkAPI
 
 			if (NetworkAPI.LogNetworkTraffic)
 			{
-				MyLog.Default.Info($"[NetworkAPI] TRANSMITTING: Sync Type: {syncType} Value: {Value}");
+				MyLog.Default.Info($"[NetworkAPI] TRANSMITTING: Property: {Id} Sync Type: {syncType} Value: {Value}");
 			}
 
 			SyncData data = new SyncData() {
@@ -243,13 +250,27 @@ namespace SENetworkAPI
 					id = MyAPIGateway.Session.LocalHumanPlayer.SteamUserId;
 				}
 
-				if (isLogicComponent && LogicComponent.Entity != null)
+				if (isLogicComponent)
 				{
-					LogicComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data), SteamId = id }, LogicComponent.Entity.GetPosition(), steamId: sendTo);
+					if (LogicComponent.Entity != null)
+					{
+						LogicComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data), SteamId = id }, LogicComponent.Entity.GetPosition(), steamId: sendTo);
+					}
+					else
+					{
+						LogicComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data), SteamId = id }, sendTo);
+					}
 				}
 				else
 				{
-					LogicComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data), SteamId = id }, sendTo);
+					SessionComponent.Network.SendCommand(new Command() { IsProperty = true, Data = MyAPIGateway.Utilities.SerializeToBinary(data), SteamId = id }, sendTo);
+				}
+			}
+			else
+			{
+				if (NetworkAPI.LogNetworkTraffic)
+				{
+					MyLog.Default.Error($"[NetworkAPI] Could not send. Network not initialized.");
 				}
 			}
 		}
@@ -258,7 +279,7 @@ namespace SENetworkAPI
 		/// Receives and processes all property changes
 		/// </summary>
 		/// <param name="pack">this hold the path to the property and the data to sync</param>
-		internal static void RouteMessage(SyncData pack, ulong sender)
+		internal static void RouteMessage(SyncData pack, ulong sender, long timestamp)
 		{
 			try
 			{
@@ -285,10 +306,11 @@ namespace SENetworkAPI
 
 					if (netLogic == null)
 					{
-						throw new Exception("The inherited \"MyGameLogicComponent\" needs to be replaced with \"MyNetworkAPIGameLogicComponent\"");
+						throw new Exception("The inherited \"MyGameLogicComponent\" needs to be replaced with \"MyNetworkGameLogicComponent\"");
 					}
 
 					NetSync property = netLogic.GetNetworkProperty(pack.PropertyId);
+					property.LastMessageTimestamp = timestamp;
 
 					if (property == null)
 					{
@@ -308,7 +330,7 @@ namespace SENetworkAPI
 				{
 					if (SessionComponents.Count <= pack.EntityId)
 					{
-						throw new Exception("Could not find Session Component in list");
+						throw new Exception($"Could not find Session Component in list");
 					}
 
 					MyNetworkSessionComponent netSession = SessionComponents[(int)pack.EntityId];
@@ -319,6 +341,7 @@ namespace SENetworkAPI
 					}
 
 					NetSync property = netSession.GetNetworkProperty(pack.PropertyId);
+					property.LastMessageTimestamp = timestamp;
 
 					if (property == null)
 					{
