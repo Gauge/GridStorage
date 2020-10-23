@@ -1,16 +1,19 @@
-﻿using Sandbox.Common.ObjectBuilders;
+﻿using Sandbox;
+using Sandbox.Common.ObjectBuilders;
 using Sandbox.Game.Entities;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
 using SENetworkAPI;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using VRage;
 using VRage.Game;
 using VRage.Game.Components;
 using VRage.Game.ModAPI;
 using VRage.Game.ModAPI.Interfaces;
+using VRage.Game.Utils;
 using VRage.Input;
 using VRage.ModAPI;
 using VRage.ObjectBuilders;
@@ -20,7 +23,7 @@ using VRageMath;
 namespace GridStorage
 {
 	[MyEntityComponentDescriptor(typeof(MyObjectBuilder_UpgradeModule), true, "GridStorageBlock")]
-	public class GridStorageBlock : MyNetworkGameLogicComponent
+	public class GridStorageBlock : MyGameLogicComponent
 	{
 		public const float GridSelectLineSize = 0.2f;
 
@@ -30,24 +33,28 @@ namespace GridStorage
 		public IMyTerminalBlock ModBlock;
 		public MyCubeBlock CubeBlock;
 
+		public List<Prefab> GridList = new List<Prefab>();
+
 		public NetSync<List<string>> GridNames;
 		public NetSync<bool> DisplayHologram;
+		public NetSync<Prefab> HologramPrefab;
 		private NetSync<DateTime> StorageCooldown;
 		private NetSync<DateTime> SpawnCooldown;
+		private NetSync<int> SelectedGridIndex;
 
 		private IMyCameraController CameraController = null;
 		private bool GridSelectionMode = true;
 		string GridSelectErrorMessage = null;
 		private float PlacementDistance = 200;
 
-
-		public List<Prefab> GridList = new List<Prefab>();
-		int SelectedGridIndex = -1;
+		private bool IsSpectating = false;
 
 		private IMyCubeGrid SelectedGridEntity = null;
 		public List<MyObjectBuilder_CubeGrid> GridsToPlace = null;
 		private List<MyCubeGrid> CubeGridsToPlace = null;
 		private List<MyCubeGrid> HologramGrids = new List<MyCubeGrid>();
+		private float HologramOffset;
+		private float HologramScale;
 
 		/// <summary>
 		/// General initialize
@@ -63,12 +70,19 @@ namespace GridStorage
 				CubeBlock = (MyCubeBlock)ModBlock;
 
 				GridNames = new NetSync<List<string>>(this, TransferType.ServerToClient, new List<string>());
+
 				DisplayHologram = new NetSync<bool>(this, TransferType.Both, false);
+				HologramPrefab = new NetSync<Prefab>(this, TransferType.ServerToClient, new Prefab());
+				HologramPrefab.ValueChanged += HologramPrefabChanged;
+
 				StorageCooldown = new NetSync<DateTime>(this, TransferType.Both, DateTime.MinValue);
 				SpawnCooldown = new NetSync<DateTime>(this, TransferType.Both, DateTime.MinValue);
+				SelectedGridIndex = new NetSync<int>(this, TransferType.Both, -1);
+				SelectedGridIndex.ValueChanged += SelectedGridIndexChanged;
 
 				if (MyAPIGateway.Multiplayer.IsServer)
 				{
+					DisplayHologram.ValueChanged += EnableHologramChanged;
 					Load();
 				}
 			}
@@ -77,7 +91,53 @@ namespace GridStorage
 				MyLog.Default.Error($"[Grid Garage] Failed on Init\n{e.ToString()}");
 			}
 
-			NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
+			NeedsUpdate = MyEntityUpdateEnum.BEFORE_NEXT_FRAME | MyEntityUpdateEnum.EACH_FRAME;
+		}
+
+		private void EnableHologramChanged(bool o, bool n)
+		{
+			if (!n)
+			{
+				HologramPrefab.Value = new Prefab();
+			}
+			else if (SelectedGridIndex.Value != -1)
+			{
+				HologramPrefab.Value = GridList[SelectedGridIndex.Value];
+			}
+		}
+
+		private void SelectedGridIndexChanged(int o, int n)
+		{
+			if (!DisplayHologram.Value || o == n)
+				return;
+
+			if (n == -1)
+			{
+				HologramPrefab.Value = new Prefab();
+			}
+			else
+			{
+				HologramPrefab.Value = GridList[n];
+			}
+		}
+
+		private void HologramPrefabChanged(Prefab o, Prefab n)
+		{
+
+			//if (HologramGrids != null)
+			//{
+			//	foreach (var g in HologramGrids)
+			//	{
+			//		MyAPIGateway.Entities.MarkForClose(g);
+			//	}
+
+			//	HologramGrids = null;
+			//}
+
+			//if (n.Grids.Count != 0)
+			//{
+			//	HologramGrids = CreateHoloProjection(HologramPrefab.Value.UnpackGrids());
+			//}
 		}
 
 		/// <summary>
@@ -101,7 +161,7 @@ namespace GridStorage
 				MyAPIGateway.Session.SetCameraController(MyCameraControllerEnum.Spectator, null, position);
 				CameraController = MyAPIGateway.Session.CameraController;
 
-				NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME;
+				IsSpectating = true;
 			}
 			catch (Exception e)
 			{
@@ -158,7 +218,7 @@ namespace GridStorage
 				GridsToPlace = null;
 				SelectedGridEntity = null;
 				CubeGridsToPlace = null;
-				NeedsUpdate &= ~MyEntityUpdateEnum.EACH_FRAME;
+				IsSpectating = false;
 			}
 			catch (Exception e)
 			{
@@ -195,20 +255,20 @@ namespace GridStorage
 
 					if (MyAPIGateway.Multiplayer.IsServer)
 					{
-						if (gsb.SelectedGridIndex != -1)
+						if (gsb.SelectedGridIndex.Value != -1)
 						{
-							gsb.GridsToPlace = gsb.GridList[gsb.SelectedGridIndex].UnpackGrids();
+							gsb.GridsToPlace = gsb.GridList[gsb.SelectedGridIndex.Value].UnpackGrids();
 						}
 					}
 					else
 					{
-						if (gsb.SelectedGridIndex != -1)
+						if (gsb.SelectedGridIndex.Value != -1)
 						{
-							Network.SendCommand(Core.Command_Preview, data: MyAPIGateway.Utilities.SerializeToBinary(new PreviewGridData() { GarageId = gsb.Entity.EntityId, Index = gsb.SelectedGridIndex }));
+							NetworkAPI.Instance.SendCommand(Core.Command_Preview, data: MyAPIGateway.Utilities.SerializeToBinary(new PreviewGridData() { GarageId = gsb.Entity.EntityId, Index = gsb.SelectedGridIndex.Value }));
 						}
 					}
 
-					if (gsb.SelectedGridIndex != -1)
+					if (gsb.SelectedGridIndex.Value != -1)
 					{
 						gsb.GridSelectionMode = false;
 						gsb.StartSpectatorView();
@@ -223,11 +283,14 @@ namespace GridStorage
 
 		/// <summary>
 		/// Update visual while selecting
-		/// </summary>
+		/// </summary>w
 		public override void UpdateBeforeSimulation()
 		{
 			try
 			{
+				if (!IsSpectating)
+					return;
+
 				// keep users from placing blocks in spectator
 				if (MyCubeBuilder.Static.BlockCreationIsActivated)
 				{
@@ -271,6 +334,11 @@ namespace GridStorage
 			{
 				MyLog.Default.Error($"[Grid Garage] Failed on UpdateBeforeSimulation\n{e.ToString()}");
 			}
+		}
+
+		public override void UpdateAfterSimulation()
+		{
+			//AnimateHologram();
 		}
 
 		private void GridSelect(List<MyMouseButtonsEnum> buttons)
@@ -327,7 +395,7 @@ namespace GridStorage
 								GridSelectErrorMessage = $"Grid Garage is full. Maximum grid count: {Core.Config.MaxGridCount}";
 								isValid = false;
 							}
-							else if (grid.BigOwners.Count == 0)
+							else if (!Core.Config.CanStoreUnownedGrids && grid.BigOwners.Count == 0)
 							{
 								GridSelectErrorMessage = $"Cannot store unowned grid";
 								isValid = false;
@@ -372,7 +440,7 @@ namespace GridStorage
 						{
 							StoreGridData data = new StoreGridData() { GarageId = Entity.EntityId, TargetId = SelectedGridEntity.EntityId };
 
-							Network.SendCommand(Core.Command_Store, data: MyAPIGateway.Utilities.SerializeToBinary(data));
+							NetworkAPI.Instance.SendCommand(Core.Command_Store, data: MyAPIGateway.Utilities.SerializeToBinary(data));
 						}
 
 						StorageCooldown.Value = DateTime.UtcNow;
@@ -489,7 +557,7 @@ namespace GridStorage
 							{
 								flag = new BoundingSphereD(zone.PositionComp.GetPosition(), zone.Radius).Intersects(box);
 							}
-							flag = new MyOrientedBoundingBoxD(zone.PositionComp.LocalAABB, zone.PositionComp.WorldMatrix).Intersects(ref box);
+							flag = new MyOrientedBoundingBoxD(zone.PositionComp.LocalAABB, zone.WorldMatrix).Intersects(ref box);
 
 							if (flag)
 							{
@@ -568,23 +636,23 @@ namespace GridStorage
 
 					if (MyAPIGateway.Multiplayer.IsServer)
 					{
-						PlacePrefab(GridList[SelectedGridIndex], matrix.Translation, playerId);
+						PlacePrefab(GridList[SelectedGridIndex.Value], matrix.Translation, playerId);
 					}
 					else
 					{
 						PlaceGridData data = new PlaceGridData() {
 							GarageId = Entity.EntityId,
-							GridIndex = SelectedGridIndex,
-							GridName = GridNames.Value[SelectedGridIndex],
+							GridIndex = SelectedGridIndex.Value,
+							GridName = GridNames.Value[SelectedGridIndex.Value],
 							NewOwner = playerId,
 							Position = new SerializableVector3D(matrix.Translation)
 						};
 
-						Network.SendCommand(Core.Command_Place, null, MyAPIGateway.Utilities.SerializeToBinary(data));
+						NetworkAPI.Instance.SendCommand(Core.Command_Place, null, MyAPIGateway.Utilities.SerializeToBinary(data));
 					}
 
+					SelectedGridIndex.Value = -1;
 					SpawnCooldown.Value = DateTime.UtcNow;
-
 					ResetView();
 				}
 			}
@@ -592,6 +660,130 @@ namespace GridStorage
 			{
 				MyLog.Default.Error($"[Grid Garage] Failed on GridPlacement\n{e.ToString()}");
 				ResetView();
+			}
+		}
+
+		private List<MyCubeGrid> CreateHoloProjection(List<MyObjectBuilder_CubeGrid> grids)
+		{
+			try
+			{
+				if (grids == null || grids.Count == 0)
+				{
+					return null;
+				}
+
+				MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
+
+				BoundingBoxD gridGroupBoundingBox = new BoundingBoxD();
+				Vector3D parentPosition = Vector3D.Zero;
+				Vector3D parentOffset = Vector3D.Zero;
+				List<MyCubeGrid> cubeGrids = new List<MyCubeGrid>();
+
+				foreach (MyObjectBuilder_CubeGrid grid in grids)
+				{
+					grid.AngularVelocity = new SerializableVector3();
+					grid.LinearVelocity = new SerializableVector3();
+					grid.XMirroxPlane = null;
+					grid.YMirroxPlane = null;
+					grid.ZMirroxPlane = null;
+					grid.IsStatic = false;
+					grid.DestructibleBlocks = false;
+					grid.CreatePhysics = false;
+					grid.IsRespawnGrid = false;
+					grid.DampenersEnabled = false;
+					grid.IsPowered = false;
+
+					foreach (MyObjectBuilder_CubeBlock block in grid.CubeBlocks)
+					{
+						MyObjectBuilder_FunctionalBlock fblock = block as MyObjectBuilder_FunctionalBlock;
+						if (fblock != null)
+						{
+							fblock.Enabled = false;
+						}
+					}
+
+					MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);//MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
+
+					if (grid == grids[0])
+					{
+						parentPosition = childGrid.WorldMatrix.Translation;
+						parentOffset = parentPosition - childGrid.PositionComp.WorldAABB.Center;
+					}
+
+					BoundingBoxD b = childGrid.PositionComp.WorldAABB;
+					Vector3D min = parentPosition - b.Min;
+					Vector3D max = parentPosition - b.Min;
+
+					if (min.X < gridGroupBoundingBox.Min.X)
+					{
+						gridGroupBoundingBox.Min.X = min.X;
+					}
+					if (min.Y < gridGroupBoundingBox.Min.Y)
+					{
+						gridGroupBoundingBox.Min.Y = min.Y;
+					}
+					if (min.Z < gridGroupBoundingBox.Min.Z)
+					{
+						gridGroupBoundingBox.Min.Z = min.Z;
+					}
+
+					if (max.X > gridGroupBoundingBox.Max.X)
+					{
+						gridGroupBoundingBox.Max.X = max.X;
+					}
+					if (max.Y > gridGroupBoundingBox.Max.Y)
+					{
+						gridGroupBoundingBox.Max.Y = max.Y;
+					}
+					if (max.Z > gridGroupBoundingBox.Max.Z)
+					{
+						gridGroupBoundingBox.Max.Z = max.Z;
+					}
+
+					cubeGrids.Add(childGrid);
+				}
+
+				Vector3D size = new Vector3D() {
+					X = Math.Abs(gridGroupBoundingBox.Min.X) + Math.Abs(gridGroupBoundingBox.Max.X),
+					Y = Math.Abs(gridGroupBoundingBox.Min.Y) + Math.Abs(gridGroupBoundingBox.Max.Y),
+					Z = Math.Abs(gridGroupBoundingBox.Min.Z) + Math.Abs(gridGroupBoundingBox.Max.Z)
+				};
+
+				double longestSide = (size.X > size.Y) ? size.X : size.Y;
+				if (size.Z > longestSide)
+				{
+					longestSide = size.Z;
+				}
+
+				HologramScale = 1f / (float)(longestSide / (CubeBlock.CubeGrid.GridSize / 2f));
+				HologramOffset = (float)(1.5f + (longestSide * HologramScale));
+
+				MyLog.Default.Info($"[Grid Garage] Hologram Box - X:{size.X} Y:{size.Y} Z:{size.Z} - longest: {longestSide} - sacle: {HologramScale.ToString("n3")}");
+
+
+				foreach (var grid in cubeGrids)
+				{
+					Vector3D position = grid.WorldMatrix.Translation;
+					Vector3D offset = (parentPosition - position) - parentOffset;
+					Vector3D scaledOffset = offset * HologramScale;
+
+					MatrixD matrix = grid.WorldMatrix;
+					matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - scaledOffset;
+					grid.WorldMatrix = matrix;
+					grid.PositionComp.Scale = HologramScale;
+
+					grid.IsPreview = true;
+
+					grid.Render.Transparency = 0.5f;
+					grid.Render.CastShadows = false;
+				}
+
+				return cubeGrids;
+			}
+			catch (Exception e)
+			{
+				MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}");
+				return null;
 			}
 		}
 
@@ -613,8 +805,20 @@ namespace GridStorage
 					grid.YMirroxPlane = null;
 					grid.ZMirroxPlane = null;
 					grid.IsStatic = false;
+					grid.DestructibleBlocks = false;
 					grid.CreatePhysics = false;
 					grid.IsRespawnGrid = false;
+					grid.DampenersEnabled = false;
+					grid.IsPowered = false;
+
+					foreach (MyObjectBuilder_CubeBlock block in grid.CubeBlocks)
+					{
+						MyObjectBuilder_FunctionalBlock fblock = block as MyObjectBuilder_FunctionalBlock;
+						if (fblock != null)
+						{
+							fblock.Enabled = false;
+						}
+					}
 				}
 
 				List<MyCubeGrid> cubeGrids = new List<MyCubeGrid>();
@@ -632,6 +836,83 @@ namespace GridStorage
 			{
 				MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}");
 				return null;
+			}
+		}
+
+		private void AnimateHologram()
+		{
+			if (HologramGrids == null || HologramGrids.Count == 0)
+				return;
+
+			//// incremental rotation
+			Matrix rotation = Matrix.CreateRotationX(0) * Matrix.CreateRotationY(0) * Matrix.CreateRotationZ(-0.01f);
+
+
+			Vector3D origin = HologramGrids[0].WorldMatrix.Translation;
+			//Vector3D parentOffset = origin - HologramGrids[0].PositionComp.WorldAABB.Center;
+
+			MyAPIGateway.Utilities.ShowNotification($"{origin.X}, {origin.Y}, {origin.Z}", 1);
+
+			foreach (var grid in HologramGrids)
+			{
+
+				MatrixD matrix = grid.WorldMatrix;
+
+				Vector3D position = matrix.Translation;
+				Vector3D offset = (origin - position);// - parentOffset;
+
+				MyAPIGateway.Utilities.ShowNotification($"{offset.X}, {offset.Y}, {offset.Z}", 1);
+
+				Vector4 red = Color.Red.ToVector4();
+
+				Vector3D.Transform(offset, rotation);
+
+
+				//Matrix t1 = Matrix.CreateTranslation(-offset);
+				//Matrix t2 = Matrix.CreateTranslation(offset);
+
+				//Matrix pointRotation = t1 * rotation * t2;
+
+				//matrix = rotation * matrix;
+
+				//Vector3D newOffset = pointRotation.Translation;
+
+				//MatrixD direction = MatrixD.Normalize(matrix * pointRotation);
+				//direction.Translation = origin + newOffset;
+
+
+				//matrix *= rotation;
+				grid.WorldMatrix = matrix;
+
+				//Vector3D position = grid.WorldMatrix.Translation;
+				//Vector3D offset = (origin - position);// - parentOffset;
+
+				//Matrix tInv = Matrix.CreateTranslation(-offset);
+				//Matrix t = Matrix.CreateTranslation(offset);
+
+
+
+				//MatrixD local = HologramGrids[0].PositionComp.WorldMatrixNormalizedInv;
+				//local *= rotation;
+				//local.Translation = offset;
+
+				//Matrix rotMatrix = grid.PositionComp.WorldMatrixRef;
+				//rotMatrix *= (PivitMatrixInv * rotation * PivitMatrix);
+
+				////MatrixD world = local * HologramGrids[0].WorldMatrix;
+				//world.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - offset;
+
+				//grid.WorldMatrix = world;
+
+
+				//MatrixD matrix = grid.WorldMatrix;
+				//matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - offset;
+
+
+
+				//matrix.SetRotationAndScale(rotMatrix);
+				//grid.WorldMatrix = matrix;
+
 			}
 		}
 
@@ -698,7 +979,7 @@ namespace GridStorage
 					MyTerminalControlListBoxItem listItem = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(name), MyStringId.GetOrCompute(""), i);
 					items.Add(listItem);
 
-					if (garage.SelectedGridIndex == i)
+					if (garage.SelectedGridIndex.Value == i)
 					{
 						selected.Add(listItem);
 					}
@@ -709,7 +990,7 @@ namespace GridStorage
 				if (garage == null)
 					return;
 
-				garage.SelectedGridIndex = (int)items[0].UserData;
+				garage.SelectedGridIndex.Value = (int)items[0].UserData;
 			});
 
 			Tools.CreateControlButton("GridGarage_Spawn", "Spawn Grid", "Spawns the grid selected in the listbox", ControlsVisible_Basic, ControlsEnabled_Basic, SpawnSelectedGridAction);

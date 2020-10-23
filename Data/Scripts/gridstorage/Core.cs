@@ -48,7 +48,6 @@ namespace GridStorage
 				Network.RegisterNetworkCommand(Command_Place, Place_Server);
 				Network.RegisterNetworkCommand(Command_Settings, Settings_Server);
 				Network.RegisterNetworkCommand(Command_Preview, Preview_Server);
-
 			}
 			else
 			{
@@ -88,8 +87,6 @@ namespace GridStorage
 				MyLog.Default.Error($"[Grid Garage] Error in function Settings_Server: {e.ToString()}");
 			}
 		}
-
-
 		private void Settings_Client(ulong steamId, string command, byte[] data, DateTime timestamp)
 		{
 			try
@@ -108,7 +105,6 @@ namespace GridStorage
 				MyLog.Default.Error($"[Grid Garage] Error in function Settings_Client: {e.ToString()}");
 			}
 		}
-
 
 		private void Preview_Server(ulong steamId, string command, byte[] data, DateTime timestamp)
 		{
@@ -208,11 +204,5 @@ namespace GridStorage
 				MyLog.Default.Error($"[Grid Garage] Error in function Preview_Client: {e.ToString()}");
 			}
 		}
-
-		protected override void UnloadData()
-		{
-			NetworkAPI.Dispose();
-		}
-
 	}
 }

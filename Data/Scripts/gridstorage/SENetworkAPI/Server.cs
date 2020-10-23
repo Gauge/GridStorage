@@ -126,7 +126,7 @@ namespace SENetworkAPI
 			List<IMyPlayer> players = new List<IMyPlayer>();
 			if (steamId == ulong.MinValue)
 			{
-				MyAPIGateway.Players.GetPlayers(players, (p) => (p.GetPosition() - point).LengthSquared() < (radius * radius));
+				MyAPIGateway.Players.GetPlayers(players, (p) => (p.GetPosition() - point).LengthSquared() < (radius * radius) && p.SteamUserId != cmd.SteamId);
 			}
 			else
 			{
@@ -143,13 +143,18 @@ namespace SENetworkAPI
 
 			if (LogNetworkTraffic)
 			{
-				MyLog.Default.Info($"[NetworkAPI] TRANSMITTING Bytes: {packet.Length}  Command: {cmd.CommandString}  To: {players.Count} Users");
+				MyLog.Default.Info($"[NetworkAPI] _TRANSMITTING_ Bytes: {packet.Length}  Command: {cmd.CommandString}  To: {players.Count} Users within {radius}m");
 			}
 
 			foreach (IMyPlayer player in players)
 			{
 				MyAPIGateway.Multiplayer.SendMessageTo(ComId, packet, player.SteamUserId, isReliable);
 			}
+		}
+
+		public override void Say(string message)
+		{
+			SendCommand(null, message);
 		}
 	}
 }

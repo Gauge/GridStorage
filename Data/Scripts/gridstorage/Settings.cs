@@ -29,15 +29,19 @@ namespace GridStorage
 		[ProtoMember(6)]
 		public int MaxGridCount;
 
+		[ProtoMember(7)]
+		public bool CanStoreUnownedGrids;
+
 		public static Settings GetDefaults()
 		{
 			return new Settings {
-				Version = 1,
+				Version = 2,
 				StorageCooldown = 30,
 				SpawnCooldown = 60,
 				CameraOrbitDistance = 1000,
 				CameraPlacementDistance = 500,
-				MaxGridCount = 0
+				MaxGridCount = 0,
+				CanStoreUnownedGrids = true
 			};
 		}
 
