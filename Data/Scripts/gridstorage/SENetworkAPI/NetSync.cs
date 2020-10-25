@@ -307,7 +307,8 @@ namespace SENetworkAPI
 					return;
 				}
 
-				if ((TransferType == TransferType.ServerToClient && !MyAPIGateway.Multiplayer.IsServer) ||
+				if (syncType != SyncType.Fetch && 
+					(TransferType == TransferType.ServerToClient && !MyAPIGateway.Multiplayer.IsServer) ||
 					(TransferType == TransferType.ClientToServer && MyAPIGateway.Multiplayer.IsServer))
 				{
 					if (NetworkAPI.LogNetworkTraffic)
@@ -339,11 +340,6 @@ namespace SENetworkAPI
 					return;
 				}
 
-				if (syncType == SyncType.Fetch && MyAPIGateway.Multiplayer.IsServer)
-				{
-					return;
-				}
-
 				SyncData data = new SyncData() {
 					Id = Id,
 					EntityId = (Entity != null) ? Entity.EntityId : 0,
@@ -364,7 +360,7 @@ namespace SENetworkAPI
 
 				if (NetworkAPI.LogNetworkTraffic)
 				{
-					MyLog.Default.Info($"[NetworkAPI] _TRANSMITTING_ {Descriptor()} - Id:{data.Id}, EId:{data.EntityId}, {data.SyncType}, Val:{_value}");
+					MyLog.Default.Info($"[NetworkAPI] _TRANSMITTING_ {Descriptor()} - Id:{data.Id}, EId:{data.EntityId}, {data.SyncType}, {((data.SyncType == SyncType.Fetch) ? "" : $"Val:{_value}")}");
 				}
 
 				if (LimitToSyncDistance && Entity != null)
@@ -445,10 +441,14 @@ namespace SENetworkAPI
 
 		/// <summary>
 		/// Request the lastest value from the server
+		/// Servers are not allowed to fetch from clients
 		/// </summary>
 		public override void Fetch()
 		{
-			SendValue(SyncType.Fetch);
+			if (!MyAPIGateway.Multiplayer.IsServer)
+			{
+				SendValue(SyncType.Fetch);
+			}
 		}
 
 		/// <summary>
