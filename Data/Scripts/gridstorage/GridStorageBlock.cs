@@ -56,6 +56,8 @@ namespace GridStorage
 		private float HologramOffset;
 		private float HologramScale;
 
+
+
 		/// <summary>
 		/// General initialize
 		/// </summary>
@@ -1131,7 +1133,9 @@ namespace GridStorage
 					StoredGrids = GridList
 				};
 
-				string output = BitConverter.ToString(MyCompression.Compress(MyAPIGateway.Utilities.SerializeToBinary(desc))).Replace("-", "");
+				byte[] bytes = MyAPIGateway.Utilities.SerializeToBinary(desc);
+				byte[] compressed = MyCompression.Compress(bytes);
+				string output = BitConverter.ToString(MyCompression.Compress(bytes)).Replace("-", "");
 
 				if (storage.ContainsKey(StorageGuid))
 				{
@@ -1142,7 +1146,7 @@ namespace GridStorage
 					storage.Add(new KeyValuePair<Guid, string>(StorageGuid, output));
 				}
 
-				MyLog.Default.Info($"[GridGarage] {Entity.EntityId}: Data Saved. Size: {output.Length}");
+				MyLog.Default.Info($"[Grid Garage] Data Saved {Entity.EntityId} String size {output.Length},  General size: {bytes.Length} bytes, Compressed size: {compressed.Length} bytes");
 			}
 			catch (Exception e)
 			{
@@ -1160,10 +1164,12 @@ namespace GridStorage
 				MyModStorageComponentBase storage = GetStorage(Entity);
 				if (storage.ContainsKey(StorageGuid))
 				{
+
 					// Remove stored grids if block is not fully built
 					if (ModBlock.SlimBlock.BuildLevelRatio <= 0.2f)
 					{
-						storage[StorageGuid] = string.Empty;
+						MyLog.Default.Warning($"[Grid Garage] {ModBlock.CubeGrid.CustomName}\\{Entity.EntityId} is below critical. Normally grid garage would remove grids within this block. Due to a bug this is being disabled.");
+						//storage[StorageGuid] = string.Empty;
 					}
 
 					StorageData data;
@@ -1177,7 +1183,10 @@ namespace GridStorage
 
 					try
 					{
-						data = MyAPIGateway.Utilities.SerializeFromBinary<StorageData>(MyCompression.Decompress(raw));
+						byte[] bytes = MyCompression.Decompress(raw);
+						data = MyAPIGateway.Utilities.SerializeFromBinary<StorageData>(bytes);
+
+						MyLog.Default.Info($"[Grid Garage] Data Saved {Entity.EntityId} String size {hex.Length},  General size: {bytes.Length} bytes, Compressed size: {raw.Length} bytes");
 					}
 					catch (Exception e)
 					{
