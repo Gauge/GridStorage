@@ -1,19 +1,15 @@
-﻿using Sandbox;
-using Sandbox.Common.ObjectBuilders;
+﻿using Sandbox.Common.ObjectBuilders;
 using Sandbox.Game.Entities;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
 using SENetworkAPI;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
 using VRage;
 using VRage.Game;
 using VRage.Game.Components;
 using VRage.Game.ModAPI;
 using VRage.Game.ModAPI.Interfaces;
-using VRage.Game.Utils;
 using VRage.Input;
 using VRage.ModAPI;
 using VRage.ObjectBuilders;
@@ -50,13 +46,23 @@ namespace GridStorage
 		private bool IsSpectating = false;
 
 		private IMyCubeGrid SelectedGridEntity = null;
-		public List<MyObjectBuilder_CubeGrid> GridsToPlace = null;
-		private List<MyCubeGrid> CubeGridsToPlace = null;
-		private List<MyCubeGrid> HologramGrids = new List<MyCubeGrid>();
+		public Prefab PlaceGridPrefab = null;
+		private List<MyCubeGrid> PlaceGrids = null;
+		private List<MyCubeGrid> HoloGrids = null;
 		private float HologramOffset;
 		private float HologramScale;
 
+		private CancelToken CancelHoloGridJob = null;
+		private CancelToken CancelPlaceGridJob = null;
 
+		private int LoadingCounter = 0;
+
+		internal class CancelToken
+		{
+			public bool IsCancelRequested = false;
+
+			public void Cancel() { IsCancelRequested = true; }
+		}
 
 		/// <summary>
 		/// General initialize
@@ -72,6 +78,7 @@ namespace GridStorage
 				CubeBlock = (MyCubeBlock)ModBlock;
 
 				GridNames = new NetSync<List<string>>(this, TransferType.ServerToClient, new List<string>());
+				GridNames.Fetch();
 
 				DisplayHologram = new NetSync<bool>(this, TransferType.Both, false);
 				HologramPrefab = new NetSync<Prefab>(this, TransferType.ServerToClient, new Prefab());
@@ -126,20 +133,17 @@ namespace GridStorage
 		private void HologramPrefabChanged(Prefab o, Prefab n)
 		{
 
-			//if (HologramGrids != null)
-			//{
-			//	foreach (var g in HologramGrids)
-			//	{
-			//		MyAPIGateway.Entities.MarkForClose(g);
-			//	}
+			if (HoloGrids != null)
+			{
+				foreach (var g in HoloGrids)
+				{
+					MyAPIGateway.Entities.MarkForClose(g);
+				}
 
-			//	HologramGrids = null;
-			//}
+				HoloGrids = null;
+			}
 
-			//if (n.Grids.Count != 0)
-			//{
-			//	HologramGrids = CreateHoloProjection(HologramPrefab.Value.UnpackGrids());
-			//}
+			CreateHoloProjection(n);
 		}
 
 		/// <summary>
@@ -177,9 +181,9 @@ namespace GridStorage
 			{
 				if (!GridSelectionMode)
 				{
-					if (CubeGridsToPlace != null)
+					if (PlaceGrids != null)
 					{
-						foreach (var grid in CubeGridsToPlace)
+						foreach (var grid in PlaceGrids)
 						{
 							MyAPIGateway.Entities.MarkForClose(grid);
 						}
@@ -212,15 +216,16 @@ namespace GridStorage
 					ShowHideBoundingBoxGridGroup(SelectedGridEntity, false);
 				}
 
-				if (CubeGridsToPlace != null && CubeGridsToPlace.Count > 0)
+				if (PlaceGrids != null && PlaceGrids.Count > 0)
 				{
-					ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], false);
+					ShowHideBoundingBoxGridGroup(PlaceGrids[0], false);
 				}
 
-				GridsToPlace = null;
+				PlaceGridPrefab = null;
 				SelectedGridEntity = null;
-				CubeGridsToPlace = null;
+				PlaceGrids = null;
 				IsSpectating = false;
+				LoadingCounter = 0;
 			}
 			catch (Exception e)
 			{
@@ -252,14 +257,11 @@ namespace GridStorage
 				GridStorageBlock gsb = block.GameLogic.GetAs<GridStorageBlock>();
 				if (gsb != null)
 				{
-					gsb.GridsToPlace = null;
-					gsb.CubeGridsToPlace = null;
-
 					if (MyAPIGateway.Multiplayer.IsServer)
 					{
 						if (gsb.SelectedGridIndex.Value != -1)
 						{
-							gsb.GridsToPlace = gsb.GridList[gsb.SelectedGridIndex.Value].UnpackGrids();
+							gsb.PlaceGridPrefab = gsb.GridList[gsb.SelectedGridIndex.Value];
 						}
 					}
 					else
@@ -306,7 +308,7 @@ namespace GridStorage
 					CancelSpectorView();
 				}
 
-				MyAPIGateway.Utilities.ShowNotification($"Select (LMB) - Cancel (RMB) - Camera Orbit ({gridToCamera.Length().ToString("n0")}/1000) - Range (500)", 1, "White");
+				MyAPIGateway.Utilities.ShowNotification($"Select (LMB) - Cancel (RMB) - Orbit ({gridToCamera.Length().ToString("n0")}/{Core.Config.CameraOrbitDistance}) - Range ({Core.Config.CameraPlacementDistance})", 1, "White");
 
 				List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
 				MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
@@ -340,7 +342,7 @@ namespace GridStorage
 
 		public override void UpdateAfterSimulation()
 		{
-			//AnimateHologram();
+			AnimateHologram();
 		}
 
 		private void GridSelect(List<MyMouseButtonsEnum> buttons)
@@ -367,10 +369,12 @@ namespace GridStorage
 				if (hitGrid != null)
 				{
 					bool isValid = true;
+					GridSelectErrorMessage = null;
 
-					if ((DateTime.UtcNow - StorageCooldown.Value).TotalSeconds < Core.Config.StorageCooldown)
+					TimeSpan time = (DateTime.UtcNow - StorageCooldown.Value);
+					if (time.Seconds < Core.Config.StorageCooldown)
 					{
-						GridSelectErrorMessage = $"Storage is on Cooldown: {(Core.Config.StorageCooldown - ((DateTime.UtcNow - StorageCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds";
+						GridSelectErrorMessage = $"Storage is on Cooldown: {(Core.Config.StorageCooldown - (time.TotalMilliseconds / 1000)).ToString("n2")} seconds";
 						isValid = false;
 					}
 
@@ -378,7 +382,8 @@ namespace GridStorage
 					{
 						SelectedGridEntity = hitGrid;
 						GridSelectErrorMessage = null;
-						List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(hitGrid, GridLinkTypeEnum.Mechanical);
+						List<IMyCubeGrid> subgrids = new List<IMyCubeGrid>();
+						MyAPIGateway.GridGroups.GetGroup(hitGrid, GridLinkTypeEnum.Mechanical, subgrids);
 
 						foreach (MyCubeGrid grid in subgrids)
 						{
@@ -427,7 +432,6 @@ namespace GridStorage
 					if (GridSelectErrorMessage != null)
 					{
 						MyAPIGateway.Utilities.ShowNotification(GridSelectErrorMessage, 1, "Red");
-
 					}
 					else if (buttons.Contains(MyMouseButtonsEnum.Left))
 					{
@@ -461,14 +465,25 @@ namespace GridStorage
 			try
 			{
 				// initialize preview grid once it is available
-				if (!GridSelectionMode && GridsToPlace == null)
+				if (!GridSelectionMode && PlaceGridPrefab == null)
 				{
 					return;
 				}
 
-				else if (CubeGridsToPlace == null)
+				if (CancelPlaceGridJob != null)
 				{
-					CubeGridsToPlace = CreateGridProjection(GridsToPlace);
+					LoadingCounter++;
+
+					string s = new string('.', LoadingCounter / 60);
+
+					MyAPIGateway.Utilities.ShowNotification(s+"LOADING"+s, 1, "White");
+					return;
+				}
+
+				if (PlaceGrids == null && CancelPlaceGridJob == null)
+				{
+					CreateGridProjection(PlaceGridPrefab);
+					return;
 				}
 
 				// limit placement distance
@@ -483,8 +498,8 @@ namespace GridStorage
 					PlacementDistance = Core.Config.CameraPlacementDistance;
 				}
 
-				MatrixD parentMatrix = CubeGridsToPlace[0].WorldMatrix;
-				foreach (MyCubeGrid grid in CubeGridsToPlace)
+				MatrixD parentMatrix = PlaceGrids[0].WorldMatrix;
+				foreach (MyCubeGrid grid in PlaceGrids)
 				{
 					Vector3D offset = parentMatrix.Translation - grid.WorldMatrix.Translation;
 					MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
@@ -505,9 +520,9 @@ namespace GridStorage
 
 				if (isValid)
 				{
-					BoundingBoxD box = CubeGridsToPlace[0].GetPhysicalGroupAABB();
+					BoundingBoxD box = PlaceGrids[0].GetPhysicalGroupAABB();
 					List<IMyEntity> entities = MyAPIGateway.Entities.GetEntitiesInAABB(ref box);
-					entities.RemoveAll((e) => !(e is MyVoxelBase || (e is IMyCubeBlock && !CubeGridsToPlace.Contains((MyCubeGrid)(e as IMyCubeBlock).CubeGrid)) || e is IMyCharacter || e is IMyFloatingObject));
+					entities.RemoveAll((e) => !(e is MyVoxelBase || (e is IMyCubeBlock && !PlaceGrids.Contains((MyCubeGrid)(e as IMyCubeBlock).CubeGrid)) || e is IMyCharacter || e is IMyFloatingObject));
 
 					foreach (IMyEntity ent in entities)
 					{
@@ -516,7 +531,7 @@ namespace GridStorage
 
 						if (ent is MyVoxelBase)
 						{
-							foreach (MyCubeGrid grid in CubeGridsToPlace)
+							foreach (MyCubeGrid grid in PlaceGrids)
 							{
 								MyTuple<float, float> voxelcheck = (ent as MyVoxelBase).GetVoxelContentInBoundingBox_Fast(grid.PositionComp.LocalAABB, grid.WorldMatrix);
 								if (!float.IsNaN(voxelcheck.Item2) && voxelcheck.Item2 > 0.1f)
@@ -613,19 +628,19 @@ namespace GridStorage
 
 				if (isValid)
 				{
-					ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], true, Color.LightGreen.ToVector4());
+					ShowHideBoundingBoxGridGroup(PlaceGrids[0], true, Color.LightGreen.ToVector4());
 				}
 				else
 				{
-					ShowHideBoundingBoxGridGroup(CubeGridsToPlace[0], true, Color.Red.ToVector4());
+					ShowHideBoundingBoxGridGroup(PlaceGrids[0], true, Color.Red.ToVector4());
 				}
 
 				// place grid
 				if (isValid && buttons.Contains(MyMouseButtonsEnum.Left))
 				{
-					if (CubeGridsToPlace != null)
+					if (PlaceGrids != null)
 					{
-						foreach (var grid in CubeGridsToPlace)
+						foreach (var grid in PlaceGrids)
 						{
 							MyAPIGateway.Entities.MarkForClose(grid);
 						}
@@ -665,197 +680,391 @@ namespace GridStorage
 			}
 		}
 
-		private List<MyCubeGrid> CreateHoloProjection(List<MyObjectBuilder_CubeGrid> grids)
+		private void CreateHoloProjection(Prefab fab)
 		{
-			try
-			{
-				if (grids == null || grids.Count == 0)
-				{
-					return null;
-				}
+			CancelHoloGridJob?.Cancel();
+			HoloGrids = new List<MyCubeGrid>() { CreateLoadingGrid() };
 
-				MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
+			MyAPIGateway.Parallel.StartBackground(() => 
+			{
+				CancelToken token = new CancelToken();
+				CancelHoloGridJob = token;
 
 				BoundingBoxD gridGroupBoundingBox = new BoundingBoxD();
 				Vector3D parentPosition = Vector3D.Zero;
 				Vector3D parentOffset = Vector3D.Zero;
 				List<MyCubeGrid> cubeGrids = new List<MyCubeGrid>();
 
-				foreach (MyObjectBuilder_CubeGrid grid in grids)
+				try
 				{
-					grid.AngularVelocity = new SerializableVector3();
-					grid.LinearVelocity = new SerializableVector3();
-					grid.XMirroxPlane = null;
-					grid.YMirroxPlane = null;
-					grid.ZMirroxPlane = null;
-					grid.IsStatic = false;
-					grid.DestructibleBlocks = false;
-					grid.CreatePhysics = false;
-					grid.IsRespawnGrid = false;
-					grid.DampenersEnabled = false;
-					grid.IsPowered = false;
+					List<MyObjectBuilder_CubeGrid> grids = fab.UnpackGrids();
+					MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
 
-					foreach (MyObjectBuilder_CubeBlock block in grid.CubeBlocks)
+					foreach (MyObjectBuilder_CubeGrid gridBuilder in grids)
 					{
-						MyObjectBuilder_FunctionalBlock fblock = block as MyObjectBuilder_FunctionalBlock;
-						if (fblock != null)
+						gridBuilder.AngularVelocity = new SerializableVector3();
+						gridBuilder.LinearVelocity = new SerializableVector3();
+						gridBuilder.XMirroxPlane = null;
+						gridBuilder.YMirroxPlane = null;
+						gridBuilder.ZMirroxPlane = null;
+						gridBuilder.IsStatic = false;
+						gridBuilder.DestructibleBlocks = false;
+						gridBuilder.CreatePhysics = false;
+						gridBuilder.IsRespawnGrid = false;
+						gridBuilder.DampenersEnabled = false;
+						gridBuilder.IsPowered = false;
+
+						foreach (MyObjectBuilder_CubeBlock block in gridBuilder.CubeBlocks)
 						{
-							fblock.Enabled = false;
+							MyObjectBuilder_FunctionalBlock fblock = block as MyObjectBuilder_FunctionalBlock;
+							if (fblock != null)
+							{
+								fblock.Enabled = false;
+							}
 						}
-					}
 
-					MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);//MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
+						if (token.IsCancelRequested)
+						{
+							return;
+						}
 
-					if (grid == grids[0])
-					{
-						parentPosition = childGrid.WorldMatrix.Translation;
-						parentOffset = parentPosition - childGrid.PositionComp.WorldAABB.Center;
-					}
+						MyAPIGateway.Entities.CreateFromObjectBuilderParallel(gridBuilder, false, (e) => {
+							MyCubeGrid g = e as MyCubeGrid;
+							if (g != null)
+							{
+								lock (cubeGrids)
+								{
+									cubeGrids.Add(g);
+								}
 
-					BoundingBoxD b = childGrid.PositionComp.WorldAABB;
-					Vector3D min = parentPosition - b.Min;
-					Vector3D max = parentPosition - b.Min;
+								if (cubeGrids.Count == grids.Count)
+								{
+									foreach (MyCubeGrid grid in cubeGrids)
+									{
+										grid.IsPreview = true;
+										grid.SyncFlag = false;
+										grid.Save = false;
+										grid.Flags |= EntityFlags.IsNotGamePrunningStructureObject;
+										grid.Render.CastShadows = false;
 
-					if (min.X < gridGroupBoundingBox.Min.X)
-					{
-						gridGroupBoundingBox.Min.X = min.X;
-					}
-					if (min.Y < gridGroupBoundingBox.Min.Y)
-					{
-						gridGroupBoundingBox.Min.Y = min.Y;
-					}
-					if (min.Z < gridGroupBoundingBox.Min.Z)
-					{
-						gridGroupBoundingBox.Min.Z = min.Z;
-					}
 
-					if (max.X > gridGroupBoundingBox.Max.X)
-					{
-						gridGroupBoundingBox.Max.X = max.X;
-					}
-					if (max.Y > gridGroupBoundingBox.Max.Y)
-					{
-						gridGroupBoundingBox.Max.Y = max.Y;
-					}
-					if (max.Z > gridGroupBoundingBox.Max.Z)
-					{
-						gridGroupBoundingBox.Max.Z = max.Z;
-					}
+										if (gridBuilder == grids[0])
+										{
+											parentPosition = grid.WorldMatrix.Translation;
+											parentOffset = parentPosition - grid.PositionComp.WorldAABB.Center;
+										}
 
-					cubeGrids.Add(childGrid);
+										BoundingBoxD b = grid.PositionComp.WorldAABB;
+										Vector3D min = parentPosition - b.Min;
+										Vector3D max = parentPosition - b.Min;
+
+										if (min.X < gridGroupBoundingBox.Min.X)
+										{
+											gridGroupBoundingBox.Min.X = min.X;
+										}
+										if (min.Y < gridGroupBoundingBox.Min.Y)
+										{
+											gridGroupBoundingBox.Min.Y = min.Y;
+										}
+										if (min.Z < gridGroupBoundingBox.Min.Z)
+										{
+											gridGroupBoundingBox.Min.Z = min.Z;
+										}
+
+										if (max.X > gridGroupBoundingBox.Max.X)
+										{
+											gridGroupBoundingBox.Max.X = max.X;
+										}
+										if (max.Y > gridGroupBoundingBox.Max.Y)
+										{
+											gridGroupBoundingBox.Max.Y = max.Y;
+										}
+										if (max.Z > gridGroupBoundingBox.Max.Z)
+										{
+											gridGroupBoundingBox.Max.Z = max.Z;
+										}
+									}
+
+									Vector3D size = new Vector3D() {
+										X = Math.Abs(gridGroupBoundingBox.Min.X) + Math.Abs(gridGroupBoundingBox.Max.X),
+										Y = Math.Abs(gridGroupBoundingBox.Min.Y) + Math.Abs(gridGroupBoundingBox.Max.Y),
+										Z = Math.Abs(gridGroupBoundingBox.Min.Z) + Math.Abs(gridGroupBoundingBox.Max.Z)
+									};
+
+									double longestSide = (size.X > size.Y) ? size.X : size.Y;
+									if (size.Z > longestSide)
+									{
+										longestSide = size.Z;
+									}
+
+									HologramScale = 1f / (float)(longestSide / (CubeBlock.CubeGrid.GridSize / 2f));
+									HologramOffset = (float)(1.3f + (longestSide * HologramScale));
+
+									//MyLog.Default.Info($"[Grid Garage] Hologram Box - X:{size.X} Y:{size.Y} Z:{size.Z} - longest: {longestSide} - sacle: {HologramScale.ToString("n3")}");
+
+									if (token.IsCancelRequested)
+									{
+										return;
+									}
+
+									foreach (var grid in cubeGrids)
+									{
+										Vector3D position = grid.WorldMatrix.Translation;
+										Vector3D offset = (parentPosition - position) - parentOffset;
+										Vector3D scaledOffset = offset * HologramScale;
+
+										MatrixD matrix = grid.WorldMatrix;
+										matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - scaledOffset;
+										grid.WorldMatrix = matrix;
+										grid.PositionComp.Scale = HologramScale;
+										MyAPIGateway.Entities.AddEntity(grid);
+									}
+
+									foreach (MyCubeGrid cg in HoloGrids)
+									{
+										MyAPIGateway.Entities.MarkForClose(cg);
+									}
+
+									HoloGrids = cubeGrids;
+									CancelHoloGridJob = null;
+								}
+							}
+						});
+					}
 				}
-
-				Vector3D size = new Vector3D() {
-					X = Math.Abs(gridGroupBoundingBox.Min.X) + Math.Abs(gridGroupBoundingBox.Max.X),
-					Y = Math.Abs(gridGroupBoundingBox.Min.Y) + Math.Abs(gridGroupBoundingBox.Max.Y),
-					Z = Math.Abs(gridGroupBoundingBox.Min.Z) + Math.Abs(gridGroupBoundingBox.Max.Z)
-				};
-
-				double longestSide = (size.X > size.Y) ? size.X : size.Y;
-				if (size.Z > longestSide)
+				catch (Exception e)
 				{
-					longestSide = size.Z;
+					MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}");
+					return;
 				}
+			});
 
-				HologramScale = 1f / (float)(longestSide / (CubeBlock.CubeGrid.GridSize / 2f));
-				HologramOffset = (float)(1.5f + (longestSide * HologramScale));
-
-				MyLog.Default.Info($"[Grid Garage] Hologram Box - X:{size.X} Y:{size.Y} Z:{size.Z} - longest: {longestSide} - sacle: {HologramScale.ToString("n3")}");
-
-
-				foreach (var grid in cubeGrids)
-				{
-					Vector3D position = grid.WorldMatrix.Translation;
-					Vector3D offset = (parentPosition - position) - parentOffset;
-					Vector3D scaledOffset = offset * HologramScale;
-
-					MatrixD matrix = grid.WorldMatrix;
-					matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - scaledOffset;
-					grid.WorldMatrix = matrix;
-					grid.PositionComp.Scale = HologramScale;
-
-					grid.IsPreview = true;
-
-					grid.Render.Transparency = 0.5f;
-					grid.Render.CastShadows = false;
-				}
-
-				return cubeGrids;
-			}
-			catch (Exception e)
-			{
-				MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}");
-				return null;
-			}
 		}
 
-		private List<MyCubeGrid> CreateGridProjection(List<MyObjectBuilder_CubeGrid> grids)
+		private void CreateGridProjection(Prefab fab)
 		{
-			try
-			{
-				if (grids == null || grids.Count == 0)
-				{
-					return null;
-				}
+			CancelPlaceGridJob?.Cancel();
+			MyAPIGateway.Parallel.StartBackground(() => {
 
-				MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
-				foreach (MyObjectBuilder_CubeGrid grid in grids)
-				{
-					grid.AngularVelocity = new SerializableVector3();
-					grid.LinearVelocity = new SerializableVector3();
-					grid.XMirroxPlane = null;
-					grid.YMirroxPlane = null;
-					grid.ZMirroxPlane = null;
-					grid.IsStatic = false;
-					grid.DestructibleBlocks = false;
-					grid.CreatePhysics = false;
-					grid.IsRespawnGrid = false;
-					grid.DampenersEnabled = false;
-					grid.IsPowered = false;
-
-					foreach (MyObjectBuilder_CubeBlock block in grid.CubeBlocks)
-					{
-						MyObjectBuilder_FunctionalBlock fblock = block as MyObjectBuilder_FunctionalBlock;
-						if (fblock != null)
-						{
-							fblock.Enabled = false;
-						}
-					}
-				}
+				CancelToken token = new CancelToken();
+				CancelPlaceGridJob = token;
 
 				List<MyCubeGrid> cubeGrids = new List<MyCubeGrid>();
-				foreach (MyObjectBuilder_CubeGrid grid in grids)
+				try
 				{
-					MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
-					childGrid.IsPreview = true;
+					List<MyObjectBuilder_CubeGrid> grids = fab.UnpackGrids();
+					MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
+					foreach (MyObjectBuilder_CubeGrid gridBuilder in grids)
+					{
+						gridBuilder.AngularVelocity = new SerializableVector3();
+						gridBuilder.LinearVelocity = new SerializableVector3();
+						gridBuilder.XMirroxPlane = null;
+						gridBuilder.YMirroxPlane = null;
+						gridBuilder.ZMirroxPlane = null;
+						gridBuilder.IsStatic = false;
+						gridBuilder.DestructibleBlocks = false;
+						gridBuilder.CreatePhysics = false;
+						gridBuilder.IsRespawnGrid = false;
+						gridBuilder.DampenersEnabled = false;
+						gridBuilder.IsPowered = false;
 
-					cubeGrids.Add(childGrid);
+						foreach (MyObjectBuilder_CubeBlock block in gridBuilder.CubeBlocks)
+						{
+							MyObjectBuilder_FunctionalBlock fblock = block as MyObjectBuilder_FunctionalBlock;
+							if (fblock != null)
+							{
+								fblock.Enabled = false;
+							}
+						}
+
+						if (token.IsCancelRequested)
+							return;
+
+						MyAPIGateway.Entities.CreateFromObjectBuilderParallel(gridBuilder, false, (e) =>
+						{
+							MyCubeGrid g = e as MyCubeGrid;
+							if (g != null)
+							{
+								cubeGrids.Add(g);
+
+								if (cubeGrids.Count == grids.Count)
+								{
+									if (token.IsCancelRequested)
+										return;
+
+									foreach (MyCubeGrid grid in cubeGrids)
+									{
+										grid.IsPreview = true;
+										grid.SyncFlag = false;
+										grid.Save = false;
+										grid.Flags |= EntityFlags.IsNotGamePrunningStructureObject;
+										grid.Render.CastShadows = false;
+
+										MyAPIGateway.Entities.AddEntity(grid);
+									}
+
+									PlaceGrids = cubeGrids;
+									CancelPlaceGridJob = null;
+								}
+							}
+						});
+					}
 				}
+				catch (Exception e)
+				{
+					MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}");
+					return;
+				}
+			});
+		}
 
-				return cubeGrids;
-			}
-			catch (Exception e)
+		private MyCubeGrid CreateLoadingGrid()
+		{
+			var gridObjectBuilder = new MyObjectBuilder_CubeGrid() {
+				EntityId = 0,
+				Skeleton = new List<BoneInfo>(),
+				ConveyorLines = new List<MyObjectBuilder_ConveyorLine>(),
+				BlockGroups = new List<MyObjectBuilder_BlockGroup>(),
+				Handbrake = false,
+				XMirroxPlane = null,
+				YMirroxPlane = null,
+				ZMirroxPlane = null,
+				PersistentFlags = MyPersistentEntityFlags2.CastShadows | MyPersistentEntityFlags2.InScene,
+				GridSizeEnum = MyCubeSize.Large,
+				IsStatic = false,
+				Name = "HoloLoadingGrid",
+				CreatePhysics = false,
+				LinearVelocity = new SerializableVector3(),
+				AngularVelocity = new SerializableVector3(),
+				PositionAndOrientation = new MyPositionAndOrientation(),
+				DisplayName = "HoloLoadingGrid",
+				DestructibleBlocks = true,
+			};
+
+			MyObjectBuilder_CubeBlock l = new MyObjectBuilder_CubeBlock() {
+				Min = new SerializableVector3I(0,0,0),
+				SubtypeName = "LargeSymbolL",
+				EntityId = 0,
+				Owner = 0,
+				BlockOrientation = new SerializableBlockOrientation(),
+				ShareMode = MyOwnershipShareModeEnum.All,
+				Name = "L",
+			};
+			gridObjectBuilder.CubeBlocks.Add(l);
+
+			MyObjectBuilder_CubeBlock o = new MyObjectBuilder_CubeBlock() {
+				Min = new SerializableVector3I(1,0,0),
+				SubtypeName = "LargeSymbolO",
+				EntityId = 0,
+				Owner = 0,
+				BlockOrientation = new SerializableBlockOrientation(),
+				ShareMode = MyOwnershipShareModeEnum.All,
+				Name = "L",
+			};
+			gridObjectBuilder.CubeBlocks.Add(o);
+
+			MyObjectBuilder_CubeBlock a = new MyObjectBuilder_CubeBlock() {
+				Min = new SerializableVector3I(2, 0, 0),
+				SubtypeName = "LargeSymbolA",
+				EntityId = 0,
+				Owner = 0,
+				BlockOrientation = new SerializableBlockOrientation(),
+				ShareMode = MyOwnershipShareModeEnum.All,
+				Name = "L",
+			};
+			gridObjectBuilder.CubeBlocks.Add(a);
+
+			MyObjectBuilder_CubeBlock d = new MyObjectBuilder_CubeBlock() {
+				Min = new SerializableVector3I(3, 0, 0),
+				SubtypeName = "LargeSymbolD",
+				EntityId = 0,
+				Owner = 0,
+				BlockOrientation = new SerializableBlockOrientation(),
+				ShareMode = MyOwnershipShareModeEnum.All,
+				Name = "L",
+			};
+			gridObjectBuilder.CubeBlocks.Add(d);
+
+			MyObjectBuilder_CubeBlock i = new MyObjectBuilder_CubeBlock() {
+				Min = new SerializableVector3I(4, 0, 0),
+				SubtypeName = "LargeSymbolI",
+				EntityId = 0,
+				Owner = 0,
+				BlockOrientation = new SerializableBlockOrientation(),
+				ShareMode = MyOwnershipShareModeEnum.All,
+				Name = "L",
+			};
+			gridObjectBuilder.CubeBlocks.Add(i);
+
+			MyObjectBuilder_CubeBlock n = new MyObjectBuilder_CubeBlock() {
+				Min = new SerializableVector3I(5, 0, 0),
+				SubtypeName = "LargeSymbolN",
+				EntityId = 0,
+				Owner = 0,
+				BlockOrientation = new SerializableBlockOrientation(),
+				ShareMode = MyOwnershipShareModeEnum.All,
+				Name = "L",
+			};
+			gridObjectBuilder.CubeBlocks.Add(n);
+
+			MyObjectBuilder_CubeBlock g = new MyObjectBuilder_CubeBlock() {
+				Min = new SerializableVector3I(6, 0, 0),
+				SubtypeName = "LargeSymbolG",
+				EntityId = 0,
+				Owner = 0,
+				BlockOrientation = new SerializableBlockOrientation(),
+				ShareMode = MyOwnershipShareModeEnum.All,
+				Name = "L",
+			};
+			gridObjectBuilder.CubeBlocks.Add(g);
+
+			MyCubeGrid grid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilder(gridObjectBuilder);
+			grid.IsPreview = true;
+			grid.SyncFlag = false;
+			grid.Save = false;
+			grid.Flags |= EntityFlags.IsNotGamePrunningStructureObject;
+			grid.Render.CastShadows = false;
+			MyAPIGateway.Entities.AddEntity(grid);
+
+			var box = grid.PositionComp.WorldAABB;
+
+			Vector3D size = new Vector3D() {
+				X = Math.Abs(box.Min.X) + Math.Abs(box.Max.X),
+				Y = Math.Abs(box.Min.Y) + Math.Abs(box.Max.Y),
+				Z = Math.Abs(box.Min.Z) + Math.Abs(box.Max.Z)
+			};
+
+			double longestSide = (size.X > size.Y) ? size.X : size.Y;
+			if (size.Z > longestSide)
 			{
-				MyLog.Default.Error($"[Grid Garage] Failed on CreateGridProjection\n{e.ToString()}");
-				return null;
+				longestSide = size.Z;
 			}
+
+			HologramScale = 1f / (float)(longestSide / (CubeBlock.CubeGrid.GridSize / 2f));
+			HologramOffset = (float)(1.3f + (longestSide * HologramScale));
+
+			MatrixD matrix = Entity.WorldMatrix;
+			matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset);
+			grid.WorldMatrix = matrix;
+			grid.PositionComp.Scale = HologramScale;
+			MyAPIGateway.Entities.AddEntity(grid);
+
+			return grid;
 		}
 
 		private void AnimateHologram()
 		{
-			if (HologramGrids == null || HologramGrids.Count == 0)
+			if (HoloGrids == null || HoloGrids.Count == 0)
 				return;
 
 			//// incremental rotation
-			Matrix rotation = Matrix.CreateRotationX(0) * Matrix.CreateRotationY(0) * Matrix.CreateRotationZ(-0.01f);
+			//Matrix rotation = Matrix.CreateRotationX(0) * Matrix.CreateRotationY(0) * Matrix.CreateRotationZ(-0.01f);
 
 
-			Vector3D origin = HologramGrids[0].WorldMatrix.Translation;
-			//Vector3D parentOffset = origin - HologramGrids[0].PositionComp.WorldAABB.Center;
+			Vector3D origin = HoloGrids[0].WorldMatrix.Translation;
+			//Vector3D parentOffset = origin - HoloGrids[0].PositionComp.WorldAABB.Center;
 
-			MyAPIGateway.Utilities.ShowNotification($"{origin.X}, {origin.Y}, {origin.Z}", 1);
-
-			foreach (var grid in HologramGrids)
+			foreach (var grid in HoloGrids)
 			{
 
 				MatrixD matrix = grid.WorldMatrix;
@@ -863,57 +1072,9 @@ namespace GridStorage
 				Vector3D position = matrix.Translation;
 				Vector3D offset = (origin - position);// - parentOffset;
 
-				MyAPIGateway.Utilities.ShowNotification($"{offset.X}, {offset.Y}, {offset.Z}", 1);
+				matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - offset;
 
-				Vector4 red = Color.Red.ToVector4();
-
-				Vector3D.Transform(offset, rotation);
-
-
-				//Matrix t1 = Matrix.CreateTranslation(-offset);
-				//Matrix t2 = Matrix.CreateTranslation(offset);
-
-				//Matrix pointRotation = t1 * rotation * t2;
-
-				//matrix = rotation * matrix;
-
-				//Vector3D newOffset = pointRotation.Translation;
-
-				//MatrixD direction = MatrixD.Normalize(matrix * pointRotation);
-				//direction.Translation = origin + newOffset;
-
-
-				//matrix *= rotation;
 				grid.WorldMatrix = matrix;
-
-				//Vector3D position = grid.WorldMatrix.Translation;
-				//Vector3D offset = (origin - position);// - parentOffset;
-
-				//Matrix tInv = Matrix.CreateTranslation(-offset);
-				//Matrix t = Matrix.CreateTranslation(offset);
-
-
-
-				//MatrixD local = HologramGrids[0].PositionComp.WorldMatrixNormalizedInv;
-				//local *= rotation;
-				//local.Translation = offset;
-
-				//Matrix rotMatrix = grid.PositionComp.WorldMatrixRef;
-				//rotMatrix *= (PivitMatrixInv * rotation * PivitMatrix);
-
-				////MatrixD world = local * HologramGrids[0].WorldMatrix;
-				//world.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - offset;
-
-				//grid.WorldMatrix = world;
-
-
-				//MatrixD matrix = grid.WorldMatrix;
-				//matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - offset;
-
-
-
-				//matrix.SetRotationAndScale(rotMatrix);
-				//grid.WorldMatrix = matrix;
 
 			}
 		}
@@ -922,7 +1083,8 @@ namespace GridStorage
 		{
 			try
 			{
-				List<IMyCubeGrid> subgrids = MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical);
+				List<IMyCubeGrid> subgrids = new List<IMyCubeGrid>();
+				MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical, subgrids);
 				foreach (MyCubeGrid sub in subgrids)
 				{
 					MyAPIGateway.Entities.EnableEntityBoundingBoxDraw(sub, enabled, color, GridSelectLineSize);
@@ -1026,7 +1188,8 @@ namespace GridStorage
 				// forced into doing strings cause the dumb serializer is erroring out otherwise.
 				prefab.Grids.Add(MyAPIGateway.Utilities.SerializeToXML((MyObjectBuilder_CubeGrid)grid.GetObjectBuilder()));
 
-				List<IMyCubeGrid> grids = MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical);
+				List<IMyCubeGrid> grids = new List<IMyCubeGrid>();
+				MyAPIGateway.GridGroups.GetGroup(grid, GridLinkTypeEnum.Mechanical, grids);
 				grids.Remove(grid);
 
 				for (int i = 0; i < grids.Count; i++)
@@ -1188,7 +1351,7 @@ namespace GridStorage
 
 						MyLog.Default.Info($"[Grid Garage] Data Saved {Entity.EntityId} String size {hex.Length},  General size: {bytes.Length} bytes, Compressed size: {raw.Length} bytes");
 					}
-					catch (Exception e)
+					catch
 					{
 						MyLog.Default.Warning($"[Grid Garage] Failed to load block details. Trying non compression method");
 						data = MyAPIGateway.Utilities.SerializeFromBinary<StorageData>(raw);

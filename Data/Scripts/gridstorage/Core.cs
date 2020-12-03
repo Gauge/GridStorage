@@ -96,7 +96,7 @@ namespace GridStorage
 
 				if (NetworkAPI.LogNetworkTraffic)
 				{
-					MyLog.Default.Info($"Recived Config, Spawn: {Config.SpawnCooldown}, Storage: {Config.StorageCooldown}");
+					MyLog.Default.Info($"[Grid Garage] Recived Config, Spawn: {Config.SpawnCooldown}, Storage: {Config.StorageCooldown}");
 				}
 
 			}
@@ -195,9 +195,12 @@ namespace GridStorage
 		{
 			try
 			{
-				PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
-				GridStorageBlock block = MyAPIGateway.Entities.GetEntityById(preview.GarageId).GameLogic.GetAs<GridStorageBlock>();
-				block.GridsToPlace = preview.Prefab.UnpackGrids();
+				MyAPIGateway.Parallel.StartBackground(() => {
+					PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
+					GridStorageBlock block = MyAPIGateway.Entities.GetEntityById(preview.GarageId).GameLogic.GetAs<GridStorageBlock>();
+					
+					block.PlaceGridPrefab = preview.Prefab;
+				});
 			}
 			catch (Exception e)
 			{
