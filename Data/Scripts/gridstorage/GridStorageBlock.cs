@@ -111,7 +111,10 @@ namespace GridStorage
 			}
 			else if (SelectedGridIndex.Value != -1)
 			{
-				HologramPrefab.Value = GridList[SelectedGridIndex.Value];
+				if (MyAPIGateway.Session.IsServer)
+				{
+					HologramPrefab.Value = GridList[SelectedGridIndex.Value];
+				}
 			}
 		}
 
@@ -126,7 +129,10 @@ namespace GridStorage
 			}
 			else
 			{
-				HologramPrefab.Value = GridList[n];
+				if (MyAPIGateway.Session.IsServer)
+				{
+					HologramPrefab.Value = GridList[n];
+				}
 			}
 		}
 
@@ -143,7 +149,10 @@ namespace GridStorage
 				HoloGrids = null;
 			}
 
-			CreateHoloProjection(n);
+			if (n.Grids.Count > 0)
+			{
+				CreateHoloProjection(n);
+			}
 		}
 
 		/// <summary>
@@ -369,12 +378,10 @@ namespace GridStorage
 				if (hitGrid != null)
 				{
 					bool isValid = true;
-					GridSelectErrorMessage = null;
 
-					TimeSpan time = (DateTime.UtcNow - StorageCooldown.Value);
-					if (time.Seconds < Core.Config.StorageCooldown)
+					if ((DateTime.UtcNow - StorageCooldown.Value).TotalSeconds < Core.Config.StorageCooldown)
 					{
-						GridSelectErrorMessage = $"Storage is on Cooldown: {(Core.Config.StorageCooldown - (time.TotalMilliseconds / 1000)).ToString("n2")} seconds";
+						GridSelectErrorMessage = $"Storage is on Cooldown: {(Core.Config.StorageCooldown - ((DateTime.UtcNow - StorageCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds";
 						isValid = false;
 					}
 
@@ -432,6 +439,7 @@ namespace GridStorage
 					if (GridSelectErrorMessage != null)
 					{
 						MyAPIGateway.Utilities.ShowNotification(GridSelectErrorMessage, 1, "Red");
+
 					}
 					else if (buttons.Contains(MyMouseButtonsEnum.Left))
 					{
