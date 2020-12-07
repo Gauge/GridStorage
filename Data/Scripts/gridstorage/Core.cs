@@ -168,7 +168,7 @@ namespace GridStorage
 
 				PlaceGridData place = MyAPIGateway.Utilities.SerializeFromBinary<PlaceGridData>(data);
 				GridStorageBlock block = MyAPIGateway.Entities.GetEntityById(place.GarageId).GameLogic.GetAs<GridStorageBlock>();
-				block.PlacePrefab(place.GridIndex, place.GridName, place.Position, place.NewOwner);
+				block.PlacePrefab(place.GridIndex, place.GridName, place.MatrixData, place.NewOwner);
 			}
 			catch (Exception e)
 			{
@@ -195,12 +195,10 @@ namespace GridStorage
 		{
 			try
 			{
-				MyAPIGateway.Parallel.StartBackground(() => {
-					PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
-					GridStorageBlock block = MyAPIGateway.Entities.GetEntityById(preview.GarageId).GameLogic.GetAs<GridStorageBlock>();
-					
-					block.PlaceGridPrefab = preview.Prefab;
-				});
+				PreviewGridData preview = MyAPIGateway.Utilities.SerializeFromBinary<PreviewGridData>(data);
+				GridStorageBlock block = MyAPIGateway.Entities.GetEntityById(preview.GarageId).GameLogic.GetAs<GridStorageBlock>();
+
+				block.PlaceGridPrefab = preview.Prefab;
 			}
 			catch (Exception e)
 			{

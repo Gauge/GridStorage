@@ -55,6 +55,7 @@ namespace GridStorage
 		private CancelToken CancelHoloGridJob = null;
 		private CancelToken CancelPlaceGridJob = null;
 
+		private int WaitingCounter = 0;
 		private int LoadingCounter = 0;
 
 		internal class CancelToken
@@ -111,7 +112,7 @@ namespace GridStorage
 			}
 			else if (SelectedGridIndex.Value != -1)
 			{
-				if (MyAPIGateway.Session.IsServer)
+				if (MyAPIGateway.Multiplayer.IsServer)
 				{
 					HologramPrefab.Value = GridList[SelectedGridIndex.Value];
 				}
@@ -129,7 +130,7 @@ namespace GridStorage
 			}
 			else
 			{
-				if (MyAPIGateway.Session.IsServer)
+				if (MyAPIGateway.Multiplayer.IsServer)
 				{
 					HologramPrefab.Value = GridList[n];
 				}
@@ -235,6 +236,7 @@ namespace GridStorage
 				PlaceGrids = null;
 				IsSpectating = false;
 				LoadingCounter = 0;
+				WaitingCounter = 0;
 			}
 			catch (Exception e)
 			{
@@ -299,53 +301,46 @@ namespace GridStorage
 		/// </summary>w
 		public override void UpdateBeforeSimulation()
 		{
-			try
+			if (!IsSpectating)
+				return;
+
+			// keep users from placing blocks in spectator
+			if (MyCubeBuilder.Static.BlockCreationIsActivated)
 			{
-				if (!IsSpectating)
-					return;
-
-				// keep users from placing blocks in spectator
-				if (MyCubeBuilder.Static.BlockCreationIsActivated)
-				{
-					MyCubeBuilder.Static.DeactivateBlockCreation();
-				}
-
-				// bind camera to a 1000m sphere
-				Vector3D gridToCamera = (ModBlock.CubeGrid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
-				if (gridToCamera.LengthSquared() > Core.Config.CameraOrbitDistance * Core.Config.CameraOrbitDistance)
-				{
-					CancelSpectorView();
-				}
-
-				MyAPIGateway.Utilities.ShowNotification($"Select (LMB) - Cancel (RMB) - Orbit ({gridToCamera.Length().ToString("n0")}/{Core.Config.CameraOrbitDistance}) - Range ({Core.Config.CameraPlacementDistance})", 1, "White");
-
-				List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
-				MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
-
-				if (buttons.Contains(MyMouseButtonsEnum.Right))
-				{
-					CancelSpectorView();
-					return;
-				}
-
-				if (CameraController != MyAPIGateway.Session.CameraController)
-				{
-					CancelSpectorView();
-					return;
-				}
-
-				if (GridSelectionMode)
-				{
-					GridSelect(buttons);
-				}
-				else
-				{
-					GridPlacement(buttons);
-				}
+				MyCubeBuilder.Static.DeactivateBlockCreation();
 			}
-			catch (Exception e)
+
+			// bind camera to a 1000m sphere
+			Vector3D gridToCamera = (ModBlock.CubeGrid.WorldAABB.Center - MyAPIGateway.Session.Camera.WorldMatrix.Translation);
+			if (gridToCamera.LengthSquared() > Core.Config.CameraOrbitDistance * Core.Config.CameraOrbitDistance)
 			{
-				MyLog.Default.Error($"[Grid Garage] Failed on UpdateBeforeSimulation\n{e.ToString()}");
+				CancelSpectorView();
+			}
+
+			MyAPIGateway.Utilities.ShowNotification($"Select (LMB) - Cancel (RMB) - Orbit ({gridToCamera.Length().ToString("n0")}/{Core.Config.CameraOrbitDistance}) - Range ({Core.Config.CameraPlacementDistance})", 1, "White");
+
+			List<MyMouseButtonsEnum> buttons = new List<MyMouseButtonsEnum>();
+			MyAPIGateway.Input.GetListOfPressedMouseButtons(buttons);
+
+			if (buttons.Contains(MyMouseButtonsEnum.Right))
+			{
+				CancelSpectorView();
+				return;
+			}
+
+			if (CameraController != MyAPIGateway.Session.CameraController)
+			{
+				CancelSpectorView();
+				return;
+			}
+
+			if (GridSelectionMode)
+			{
+				GridSelect(buttons);
+			}
+			else
+			{
+				GridPlacement(buttons);
 			}
 		}
 
@@ -475,6 +470,11 @@ namespace GridStorage
 				// initialize preview grid once it is available
 				if (!GridSelectionMode && PlaceGridPrefab == null)
 				{
+					WaitingCounter++;
+
+					string s = new string('.', WaitingCounter / 60);
+
+					MyAPIGateway.Utilities.ShowNotification(s + "WAITING FOR DATA" + s, 1, "White");
 					return;
 				}
 
@@ -506,15 +506,58 @@ namespace GridStorage
 					PlacementDistance = Core.Config.CameraPlacementDistance;
 				}
 
-				MatrixD parentMatrix = PlaceGrids[0].WorldMatrix;
+				MatrixD camMatrix = MyAPIGateway.Session.Camera.WorldMatrix;
+
+				List<MyKeys> keys = new List<MyKeys>();
+				MyAPIGateway.Input.GetListOfPressedKeys(keys);
+
+				MatrixD rotation = MatrixD.Identity;
+				if (keys.Contains(MyKeys.PageUp))
+				{
+					rotation *= MatrixD.CreateFromAxisAngle(camMatrix.Forward, 0.01);
+				}
+				
+				if (keys.Contains(MyKeys.PageDown))
+				{
+					rotation *= MatrixD.CreateFromAxisAngle(camMatrix.Up, 0.01);
+				}
+				
+				if (keys.Contains(MyKeys.Home))
+				{
+					rotation *= MatrixD.CreateFromAxisAngle(camMatrix.Left, 0.01);
+				}
+				
+				if (keys.Contains(MyKeys.End))
+				{
+					rotation *= MatrixD.CreateFromAxisAngle(camMatrix.Left, -0.01);
+				}
+				
+				if (keys.Contains(MyKeys.Insert))
+				{
+					rotation *= MatrixD.CreateFromAxisAngle(camMatrix.Forward, -0.01);
+				}
+				
+				if (keys.Contains(MyKeys.Delete))
+				{
+					rotation *= MatrixD.CreateFromAxisAngle(camMatrix.Up, -0.01);
+				}
+
+				Vector3D parentGridPosition = PlaceGrids[0].WorldMatrix.Translation;
 				foreach (MyCubeGrid grid in PlaceGrids)
 				{
-					Vector3D offset = parentMatrix.Translation - grid.WorldMatrix.Translation;
-					MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
-					matrix.Translation -= offset;
-					matrix.Translation += (matrix.Forward * PlacementDistance);
+					MatrixD gridMatrix = grid.WorldMatrix;
 
-					grid.Teleport(matrix);
+					Vector3D hingePoint = camMatrix.Translation + (camMatrix.Forward * PlacementDistance);
+					MatrixD nagative = MatrixD.CreateTranslation(-hingePoint);
+					MatrixD positive = MatrixD.CreateTranslation(hingePoint);
+
+					gridMatrix = gridMatrix * (nagative * rotation * positive);
+
+					Vector3D offset = (parentGridPosition - gridMatrix.Translation);
+
+					gridMatrix.Translation = hingePoint - offset;
+
+					grid.WorldMatrix = gridMatrix;
 				}
 
 				// validate grid placement position
@@ -654,14 +697,20 @@ namespace GridStorage
 						}
 					}
 
-					MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
-					matrix.Translation += (matrix.Forward * PlacementDistance);
+					//MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
+					//matrix.Translation += (matrix.Forward * PlacementDistance);
+
+					List<MyPositionAndOrientation> matrixData = new List<MyPositionAndOrientation>();
+					foreach (MyCubeGrid grid in PlaceGrids)
+					{
+						matrixData.Add(new MyPositionAndOrientation(grid.WorldMatrix));
+					}
 
 					long playerId = (MyAPIGateway.Session.Player == null) ? 0 : MyAPIGateway.Session.Player.IdentityId;
 
 					if (MyAPIGateway.Multiplayer.IsServer)
 					{
-						PlacePrefab(GridList[SelectedGridIndex.Value], matrix.Translation, playerId);
+						PlacePrefab(GridList[SelectedGridIndex.Value], matrixData, playerId);
 					}
 					else
 					{
@@ -670,7 +719,7 @@ namespace GridStorage
 							GridIndex = SelectedGridIndex.Value,
 							GridName = GridNames.Value[SelectedGridIndex.Value],
 							NewOwner = playerId,
-							Position = new SerializableVector3D(matrix.Translation)
+							MatrixData = matrixData
 						};
 
 						NetworkAPI.Instance.SendCommand(Core.Command_Place, null, MyAPIGateway.Utilities.SerializeToBinary(data));
@@ -826,6 +875,8 @@ namespace GridStorage
 										grid.WorldMatrix = matrix;
 										grid.PositionComp.Scale = HologramScale;
 										MyAPIGateway.Entities.AddEntity(grid);
+
+
 									}
 
 									foreach (MyCubeGrid cg in HoloGrids)
@@ -1065,25 +1116,27 @@ namespace GridStorage
 			if (HoloGrids == null || HoloGrids.Count == 0)
 				return;
 
-			//// incremental rotation
-			//Matrix rotation = Matrix.CreateRotationX(0) * Matrix.CreateRotationY(0) * Matrix.CreateRotationZ(-0.01f);
+			MatrixD rotation = MatrixD.CreateFromAxisAngle(CubeBlock.WorldMatrix.Up, 0.005);// *
+								//MatrixD.CreateFromAxisAngle(CubeBlock.WorldMatrix.Left, 0) * 
+								//MatrixD.CreateFromAxisAngle(CubeBlock.WorldMatrix.Forward, 0);
 
-
-			Vector3D origin = HoloGrids[0].WorldMatrix.Translation;
-			//Vector3D parentOffset = origin - HoloGrids[0].PositionComp.WorldAABB.Center;
+			Vector3D parentGridPosition = HoloGrids[0].WorldMatrix.Translation;
 
 			foreach (var grid in HoloGrids)
 			{
+				MatrixD gridMatrix = grid.WorldMatrix;
 
-				MatrixD matrix = grid.WorldMatrix;
+				Vector3D hingePoint = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset);
+				MatrixD nagative = MatrixD.CreateTranslation(-hingePoint);
+				MatrixD positive = MatrixD.CreateTranslation(hingePoint);
 
-				Vector3D position = matrix.Translation;
-				Vector3D offset = (origin - position);// - parentOffset;
+				gridMatrix = gridMatrix * (nagative * rotation * positive);
 
-				matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - offset;
+				Vector3D offset = (parentGridPosition - gridMatrix.Translation);
 
-				grid.WorldMatrix = matrix;
+				gridMatrix.Translation = hingePoint - offset;
 
+				grid.WorldMatrix = gridMatrix;
 			}
 		}
 
@@ -1222,7 +1275,7 @@ namespace GridStorage
 			}
 		}
 
-		public void PlacePrefab(int prefabIndex, string prefabName, Vector3D position, long ownerId)
+		public void PlacePrefab(int prefabIndex, string prefabName, List<MyPositionAndOrientation> matrixData, long ownerId)
 		{
 			try
 			{
@@ -1230,7 +1283,7 @@ namespace GridStorage
 
 				if (fab.Name == prefabName)
 				{
-					PlacePrefab(fab, position, ownerId);
+					PlacePrefab(fab, matrixData, ownerId);
 				}
 			}
 			catch (Exception e)
@@ -1239,56 +1292,55 @@ namespace GridStorage
 			}
 		}
 
-		public void PlacePrefab(Prefab fab, Vector3D position, long ownerId)
+		public void PlacePrefab(Prefab fab, List<MyPositionAndOrientation> matrixData, long ownerId)
 		{
-			try
-			{
-				List<MyObjectBuilder_CubeGrid> grids = fab.UnpackGrids();
-
-				MyLog.Default.Info($"[Grid Garage] Spawning grid: {fab.Name}");
-
-				if (grids == null || grids.Count == 0)
+			MyAPIGateway.Parallel.StartBackground(() => {
+				try
 				{
-					return;
-				}
+					List<MyObjectBuilder_CubeGrid> grids = fab.UnpackGrids();
 
-				MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
-				foreach (MyObjectBuilder_CubeGrid grid in grids)
-				{
-					grid.AngularVelocity = new SerializableVector3();
-					grid.LinearVelocity = new SerializableVector3();
-					grid.XMirroxPlane = null;
-					grid.YMirroxPlane = null;
-					grid.ZMirroxPlane = null;
-					grid.IsStatic = false;
-					grid.CreatePhysics = true;
-					grid.IsRespawnGrid = false;
+					MyLog.Default.Info($"[Grid Garage] Spawning grid: {fab.Name}");
 
-				}
-
-				Vector3D parentPosition = grids[0].PositionAndOrientation.Value.Position;
-
-				foreach (MyObjectBuilder_CubeGrid grid in grids)
-				{
-					Vector3D offset = parentPosition - grid.PositionAndOrientation.Value.Position;
-					grid.PositionAndOrientation = new MyPositionAndOrientation((position - offset), grid.PositionAndOrientation.Value.Forward, grid.PositionAndOrientation.Value.Up);
-
-					foreach (MyObjectBuilder_CubeBlock cubeBlock in grid.CubeBlocks)
+					if (grids == null || grids.Count == 0)
 					{
-						cubeBlock.Owner = ownerId;
+						return;
 					}
 
-					MyCubeGrid childGrid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilderAndAdd(grid);
-					childGrid.Render.Visible = true;
-				}
+					MyAPIGateway.Entities.RemapObjectBuilderCollection(grids);
+					for (int i = 0; i < grids.Count; i++)
+					{
+						MyObjectBuilder_CubeGrid grid = grids[i];
+						grid.AngularVelocity = new SerializableVector3();
+						grid.LinearVelocity = new SerializableVector3();
+						grid.XMirroxPlane = null;
+						grid.YMirroxPlane = null;
+						grid.ZMirroxPlane = null;
+						grid.IsStatic = false;
+						grid.CreatePhysics = true;
+						grid.IsRespawnGrid = false;
 
-				GridList.Remove(fab);
-				UpdateGridNames();
-			}
-			catch (Exception e)
-			{
-				MyLog.Default.Error($"[Grid Garage] Failed to spawn grid:\n{e.ToString()}");
-			}
+						grid.PositionAndOrientation = matrixData[i];
+
+						foreach (MyObjectBuilder_CubeBlock cubeBlock in grid.CubeBlocks)
+						{
+							cubeBlock.Owner = ownerId;
+						}
+
+					}
+
+					foreach (MyObjectBuilder_CubeGrid grid in grids)
+					{
+						MyAPIGateway.Entities.CreateFromObjectBuilderParallel(grid, true);
+					}
+
+					GridList.Remove(fab);
+					UpdateGridNames();
+				}
+				catch (Exception e)
+				{
+					MyLog.Default.Error($"[Grid Garage] Failed to spawn grid:\n{e.ToString()}");
+				}
+			});
 		}
 
 		/// <summary>

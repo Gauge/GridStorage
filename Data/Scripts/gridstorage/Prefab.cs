@@ -83,7 +83,7 @@ namespace GridStorage
 		public long NewOwner;
 
 		[ProtoMember(5)]
-		public SerializableVector3D Position;
+		public List<MyPositionAndOrientation> MatrixData = new List<MyPositionAndOrientation>();
 	}
 
 	[ProtoContract]
