@@ -79,7 +79,6 @@ namespace GridStorage
 				CubeBlock = (MyCubeBlock)ModBlock;
 
 				GridNames = new NetSync<List<string>>(this, TransferType.ServerToClient, new List<string>());
-				GridNames.Fetch();
 
 				DisplayHologram = new NetSync<bool>(this, TransferType.Both, false);
 				HologramPrefab = new NetSync<Prefab>(this, TransferType.ServerToClient, new Prefab());
@@ -296,9 +295,6 @@ namespace GridStorage
 			}
 		}
 
-		/// <summary>
-		/// Update visual while selecting
-		/// </summary>w
 		public override void UpdateBeforeSimulation()
 		{
 			if (!IsSpectating)
