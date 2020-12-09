@@ -682,14 +682,18 @@ namespace GridStorage
 					}
 				}
 
-				if (isValid)
+				foreach (MyCubeGrid grid in PlaceGrids)
 				{
-					ShowHideBoundingBoxGridGroup(PlaceGrids[0], true, Color.LightGreen.ToVector4());
+					if (isValid)
+					{
+						ShowHideBoundingBoxGridGroup(grid, true, Color.LightGreen.ToVector4());
+					}
+					else
+					{
+						ShowHideBoundingBoxGridGroup(grid, true, Color.Red.ToVector4());
+					}
 				}
-				else
-				{
-					ShowHideBoundingBoxGridGroup(PlaceGrids[0], true, Color.Red.ToVector4());
-				}
+
 
 				// place grid
 				if (isValid && buttons.Contains(MyMouseButtonsEnum.Left))
