@@ -25,8 +25,11 @@ namespace GridStorage
 				list.Add(MyAPIGateway.Utilities.SerializeFromXML<MyObjectBuilder_CubeGrid>(gridXML));
 			}
 
-			foreach (MyObjectBuilder_CubeGrid grid in list)
+			for (int i = 0; i < list.Count; i++)
 			{
+				MyObjectBuilder_CubeGrid grid = list[i];
+				grid.Name = i.ToString();
+
 				foreach (MyObjectBuilder_CubeBlock cubeBlock in grid.CubeBlocks)
 				{
 					if (cubeBlock is MyObjectBuilder_Cockpit)

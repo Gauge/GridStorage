@@ -861,6 +861,7 @@ namespace GridStorage
 
 					foreach (MyObjectBuilder_CubeBlock block in gridBuilder.CubeBlocks)
 					{
+
 						MyObjectBuilder_FunctionalBlock fblock = block as MyObjectBuilder_FunctionalBlock;
 						if (fblock != null)
 						{
@@ -882,6 +883,7 @@ namespace GridStorage
 								if (token.IsCancelRequested)
 									return;
 
+								MyCubeGrid[] list = new MyCubeGrid[cubeGrids.Count];
 								foreach (MyCubeGrid grid in cubeGrids)
 								{
 									grid.IsPreview = true;
@@ -890,10 +892,12 @@ namespace GridStorage
 									grid.Flags |= EntityFlags.IsNotGamePrunningStructureObject;
 									grid.Render.CastShadows = false;
 
+									list[int.Parse(grid.Name)] = grid;
+									
 									MyAPIGateway.Entities.AddEntity(grid);
 								}
 
-								PlaceGrids = cubeGrids;
+								PlaceGrids = new List<MyCubeGrid>(list);
 								CancelPlaceGridJob = null;
 							}
 						}
