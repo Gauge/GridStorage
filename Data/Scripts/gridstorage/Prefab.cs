@@ -28,7 +28,7 @@ namespace GridStorage
 			for (int i = 0; i < list.Count; i++)
 			{
 				MyObjectBuilder_CubeGrid grid = list[i];
-				grid.Name = i.ToString();
+				grid.playedTime = i; // using played time because there is no other place to hold a variable
 
 				foreach (MyObjectBuilder_CubeBlock cubeBlock in grid.CubeBlocks)
 				{

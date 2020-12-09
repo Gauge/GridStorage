@@ -904,7 +904,9 @@ namespace GridStorage
 									grid.Flags |= EntityFlags.IsNotGamePrunningStructureObject;
 									grid.Render.CastShadows = false;
 
-									list[int.Parse(grid.Name)] = grid;
+									// using played time because there is no other place to hold a variable
+									// we need to reorder the grids so that the indexes line up when a player spawn the grid.
+									list[grid.m_playedTime] = grid; 
 									
 									MyAPIGateway.Entities.AddEntity(grid);
 								}
