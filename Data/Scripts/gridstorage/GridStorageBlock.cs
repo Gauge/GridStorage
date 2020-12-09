@@ -539,6 +539,16 @@ namespace GridStorage
 					rotation *= MatrixD.CreateFromAxisAngle(camMatrix.Up, -0.01);
 				}
 
+				BoundingBoxD parentBoundingBox = PlaceGrids[0].PositionComp.WorldAABB;
+				BoundingBoxD groupBoundingBox = new BoundingBoxD(parentBoundingBox.Min, parentBoundingBox.Max);
+
+				foreach (MyCubeGrid grid in PlaceGrids)
+				{
+					groupBoundingBox.Include(grid.PositionComp.WorldAABB);
+				}
+
+				Vector3D boxCenter = groupBoundingBox.Center;
+
 				Vector3D parentGridPosition = PlaceGrids[0].WorldMatrix.Translation;
 				foreach (MyCubeGrid grid in PlaceGrids)
 				{
@@ -550,9 +560,7 @@ namespace GridStorage
 
 					gridMatrix = gridMatrix * (nagative * rotation * positive);
 
-					Vector3D offset = (parentGridPosition - gridMatrix.Translation);
-
-					gridMatrix.Translation = hingePoint - offset;
+					gridMatrix.Translation = hingePoint - (boxCenter - gridMatrix.Translation);
 
 					grid.WorldMatrix = gridMatrix;
 				}
