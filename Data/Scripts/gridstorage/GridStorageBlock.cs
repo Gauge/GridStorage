@@ -2,6 +2,7 @@
 using Sandbox.Game.Entities;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
+using Sandbox.ModAPI.Interfaces.Terminal;
 using SENetworkAPI;
 using System;
 using System.Collections.Generic;
@@ -1192,9 +1193,21 @@ namespace GridStorage
 
 					}
 
+					List<IMyEntity> registeredGrids = new List<IMyEntity>();
 					foreach (MyObjectBuilder_CubeGrid grid in grids)
 					{
-						MyAPIGateway.Entities.CreateFromObjectBuilderParallel(grid, true);
+						MyAPIGateway.Entities.CreateFromObjectBuilderParallel(grid, false, (g)=>
+						{
+							registeredGrids.Add(g);
+
+							if (registeredGrids.Count == grids.Count)
+							{
+								foreach (IMyEntity e in registeredGrids)
+								{
+									MyAPIGateway.Entities.AddEntity(e);
+								}
+							}
+						});
 					}
 
 					GridList.Remove(fab);
@@ -1304,6 +1317,15 @@ namespace GridStorage
 			}
 
 			GridNames.Push();
+
+			List<IMyTerminalControl> controls = new List<IMyTerminalControl>();
+			MyAPIGateway.TerminalControls.GetControls<IMyUpgradeModule>(out controls);
+
+			foreach (IMyTerminalControl control in controls)
+			{
+				control.UpdateVisual();
+			}
+
 		}
 
 		public static bool GridHasNonFactionOwners(IMyCubeGrid grid)
