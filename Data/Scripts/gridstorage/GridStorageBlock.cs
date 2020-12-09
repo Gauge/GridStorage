@@ -748,8 +748,6 @@ namespace GridStorage
 
 				foreach (MyObjectBuilder_CubeGrid gridBuilder in grids)
 				{
-					gridBuilder.AngularVelocity = new SerializableVector3();
-					gridBuilder.LinearVelocity = new SerializableVector3();
 					gridBuilder.XMirroxPlane = null;
 					gridBuilder.YMirroxPlane = null;
 					gridBuilder.ZMirroxPlane = null;
@@ -799,10 +797,7 @@ namespace GridStorage
 									groupBoundingBox.Include(grid.PositionComp.WorldAABB);
 								}
 
-								double longestSide = groupBoundingBox.Size.Max();
-								HologramScale = 1f / (float)(longestSide / (CubeBlock.CubeGrid.GridSize * 0.45f));
-								HologramOffset = (float)(0.5f + (longestSide * HologramScale) * 0.5f);
-
+								ApplyHologramScaleAndOffset(CubeBlock.CubeGrid.GridSize, groupBoundingBox.Size.Max());
 								Vector3D holoOrigin = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset);
 
 								if (token.IsCancelRequested)
@@ -908,105 +903,31 @@ namespace GridStorage
 
 		private MyCubeGrid CreateLoadingGrid()
 		{
-			var gridObjectBuilder = new MyObjectBuilder_CubeGrid() {
-				EntityId = 0,
-				Skeleton = new List<BoneInfo>(),
-				ConveyorLines = new List<MyObjectBuilder_ConveyorLine>(),
-				BlockGroups = new List<MyObjectBuilder_BlockGroup>(),
-				Handbrake = false,
+			var wordGrid = new MyObjectBuilder_CubeGrid() {
 				XMirroxPlane = null,
 				YMirroxPlane = null,
 				ZMirroxPlane = null,
-				PersistentFlags = MyPersistentEntityFlags2.CastShadows | MyPersistentEntityFlags2.InScene,
-				GridSizeEnum = MyCubeSize.Large,
 				IsStatic = false,
-				Name = "HoloLoadingGrid",
+				DestructibleBlocks = false,
 				CreatePhysics = false,
-				LinearVelocity = new SerializableVector3(),
-				AngularVelocity = new SerializableVector3(),
-				PositionAndOrientation = new MyPositionAndOrientation(),
-				DisplayName = "HoloLoadingGrid",
-				DestructibleBlocks = true,
-			};
+				IsRespawnGrid = false,
+				DampenersEnabled = false,
+				IsPowered = false,
+		};
 
-			MyObjectBuilder_CubeBlock l = new MyObjectBuilder_CubeBlock() {
-				Min = new SerializableVector3I(0, 0, 0),
-				SubtypeName = "LargeSymbolL",
-				EntityId = 0,
-				Owner = 0,
-				BlockOrientation = new SerializableBlockOrientation(),
-				ShareMode = MyOwnershipShareModeEnum.All,
-				Name = "L",
-			};
-			gridObjectBuilder.CubeBlocks.Add(l);
+			string text = "LOADING";
 
-			MyObjectBuilder_CubeBlock o = new MyObjectBuilder_CubeBlock() {
-				Min = new SerializableVector3I(1, 0, 0),
-				SubtypeName = "LargeSymbolO",
-				EntityId = 0,
-				Owner = 0,
-				BlockOrientation = new SerializableBlockOrientation(),
-				ShareMode = MyOwnershipShareModeEnum.All,
-				Name = "L",
-			};
-			gridObjectBuilder.CubeBlocks.Add(o);
+			for (int i = 0; i < text.Length; i++)
+			{
+				char c = text[i];
+				MyObjectBuilder_CubeBlock letter = new MyObjectBuilder_CubeBlock() {
+					Min = new SerializableVector3I(i, 0, 0),
+					SubtypeName = $"LargeSymbol{c}",
+				};
+				wordGrid.CubeBlocks.Add(letter);
+			}
 
-			MyObjectBuilder_CubeBlock a = new MyObjectBuilder_CubeBlock() {
-				Min = new SerializableVector3I(2, 0, 0),
-				SubtypeName = "LargeSymbolA",
-				EntityId = 0,
-				Owner = 0,
-				BlockOrientation = new SerializableBlockOrientation(),
-				ShareMode = MyOwnershipShareModeEnum.All,
-				Name = "L",
-			};
-			gridObjectBuilder.CubeBlocks.Add(a);
-
-			MyObjectBuilder_CubeBlock d = new MyObjectBuilder_CubeBlock() {
-				Min = new SerializableVector3I(3, 0, 0),
-				SubtypeName = "LargeSymbolD",
-				EntityId = 0,
-				Owner = 0,
-				BlockOrientation = new SerializableBlockOrientation(),
-				ShareMode = MyOwnershipShareModeEnum.All,
-				Name = "L",
-			};
-			gridObjectBuilder.CubeBlocks.Add(d);
-
-			MyObjectBuilder_CubeBlock i = new MyObjectBuilder_CubeBlock() {
-				Min = new SerializableVector3I(4, 0, 0),
-				SubtypeName = "LargeSymbolI",
-				EntityId = 0,
-				Owner = 0,
-				BlockOrientation = new SerializableBlockOrientation(),
-				ShareMode = MyOwnershipShareModeEnum.All,
-				Name = "L",
-			};
-			gridObjectBuilder.CubeBlocks.Add(i);
-
-			MyObjectBuilder_CubeBlock n = new MyObjectBuilder_CubeBlock() {
-				Min = new SerializableVector3I(5, 0, 0),
-				SubtypeName = "LargeSymbolN",
-				EntityId = 0,
-				Owner = 0,
-				BlockOrientation = new SerializableBlockOrientation(),
-				ShareMode = MyOwnershipShareModeEnum.All,
-				Name = "L",
-			};
-			gridObjectBuilder.CubeBlocks.Add(n);
-
-			MyObjectBuilder_CubeBlock g = new MyObjectBuilder_CubeBlock() {
-				Min = new SerializableVector3I(6, 0, 0),
-				SubtypeName = "LargeSymbolG",
-				EntityId = 0,
-				Owner = 0,
-				BlockOrientation = new SerializableBlockOrientation(),
-				ShareMode = MyOwnershipShareModeEnum.All,
-				Name = "L",
-			};
-			gridObjectBuilder.CubeBlocks.Add(g);
-
-			MyCubeGrid grid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilder(gridObjectBuilder);
+			MyCubeGrid grid = (MyCubeGrid)MyAPIGateway.Entities.CreateFromObjectBuilder(wordGrid);
 			grid.IsPreview = true;
 			grid.SyncFlag = false;
 			grid.Save = false;
@@ -1014,30 +935,32 @@ namespace GridStorage
 			grid.Render.CastShadows = false;
 			MyAPIGateway.Entities.AddEntity(grid);
 
-			var box = grid.PositionComp.WorldAABB;
+			ApplyHologramScaleAndOffset(CubeBlock.CubeGrid.GridSize, grid.PositionComp.WorldAABB.Size.Max());
 
-			Vector3D size = new Vector3D() {
-				X = Math.Abs(box.Min.X) + Math.Abs(box.Max.X),
-				Y = Math.Abs(box.Min.Y) + Math.Abs(box.Max.Y),
-				Z = Math.Abs(box.Min.Z) + Math.Abs(box.Max.Z)
-			};
+			MatrixD matrix = grid.WorldMatrix;
 
-			double longestSide = (size.X > size.Y) ? size.X : size.Y;
-			if (size.Z > longestSide)
-			{
-				longestSide = size.Z;
-			}
-
-			HologramScale = 1f / (float)(longestSide / (CubeBlock.CubeGrid.GridSize / 2f));
-			HologramOffset = (float)(1.3f + (longestSide * HologramScale));
-
-			MatrixD matrix = Entity.WorldMatrix;
-			matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset);
+			// re-align to grid garage
+			matrix.Translation = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset) - (grid.PositionComp.WorldAABB.Center - matrix.Translation);
+			
+			// apply
 			grid.WorldMatrix = matrix;
 			grid.PositionComp.Scale = HologramScale;
+			
+			// load
 			MyAPIGateway.Entities.AddEntity(grid);
 
 			return grid;
+		}
+		
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="gridSize">large or small grid in number form</param>
+		/// <param name="longestSide">the longest side of the grid group</param>
+		private void ApplyHologramScaleAndOffset(float gridSize, double longestSide) 
+		{
+			HologramScale = (float)(1f / (longestSide / (gridSize * 0.45f)));
+			HologramOffset = (float)(0.5f + (longestSide * HologramScale * 0.5f));
 		}
 
 		private void SetLoadingProjection()
