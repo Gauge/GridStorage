@@ -57,7 +57,7 @@ namespace GridStorage
 		private float HologramScale;
 
 		private bool TerminalButtonPressed = false;
-		private string[] TerminalButtonNames = new string[] { "detector_terminal_1", "detector_terminal_2", "detector_terminal_3", "detector_terminal_4" };
+		private string[] TerminalButtonNames = new string[] { "detector_terminal_1", "detector_terminal_2", "detector_terminal_3", "detector_terminal_4", "detector_terminal_5", "detector_terminal_6" };
 
 		private CancelToken CancelHoloGridJob = null;
 		private CancelToken CancelPlaceGridJob = null;
@@ -242,14 +242,14 @@ namespace GridStorage
 			{
 				if (MyAPIGateway.Multiplayer.IsServer)
 				{
-					if (gsb.SelectedGridIndex.Value != -1)
+					if (gsb.SelectedGridIndex.Value != -1 && gsb.SelectedGridIndex.Value < gsb.GridNames.Value.Count)
 					{
 						gsb.PlaceGridPrefab = gsb.GridList[gsb.SelectedGridIndex.Value];
 					}
 				}
 				else
 				{
-					if (gsb.SelectedGridIndex.Value != -1)
+					if (gsb.SelectedGridIndex.Value != -1 && gsb.SelectedGridIndex.Value < gsb.GridNames.Value.Count)
 					{
 						NetworkAPI.Instance.SendCommand(Core.Command_Preview, data: MyAPIGateway.Utilities.SerializeToBinary(new PreviewGridData() { GarageId = gsb.Entity.EntityId, Index = gsb.SelectedGridIndex.Value }));
 					}
@@ -369,18 +369,14 @@ namespace GridStorage
 					{
 						SelectedGridIndex.Value = IntWrap(SelectedGridIndex.Value, 1, GridNames.Value.Count);
 					}
-					else
+					else if (dummy.Name == "detector_terminal_5" || dummy.Name == "detector_terminal_6")
 					{
-						if (MyAPIGateway.Session.Player.Character != null)
-						{
-							EnableTerminal(true);
-							comp.UseObject.Use(UseActionEnum.OpenTerminal, MyAPIGateway.Session.Player.Character);
-						}
+						SpawnSelectedGridAction(CubeBlock as IMyTerminalBlock);
 					}
 				}
 
 				TerminalButtonPressed = isUsePressed;
-				MyAPIGateway.Utilities.ShowNotification($"Index: {SelectedGridIndex.Value}, Name: {(SelectedGridIndex.Value == -1 ? "N/A" : (HologramPrefab.Value.Name == string.Empty ? "LOADING...": HologramPrefab.Value.Name))}", 1, "white");
+				MyAPIGateway.Utilities.ShowNotification($"Index: {SelectedGridIndex.Value}, Name: {(SelectedGridIndex.Value == -1 ? "N/A" : (HologramPrefab.Value.Name == string.Empty ? "LOADING..." : HologramPrefab.Value.Name))}", 1, "white");
 			}
 		}
 
@@ -753,9 +749,6 @@ namespace GridStorage
 					}
 				}
 
-				//MatrixD matrix = MyAPIGateway.Session.Camera.WorldMatrix;
-				//matrix.Translation += (matrix.Forward * PlacementDistance);
-
 				List<MyPositionAndOrientation> matrixData = new List<MyPositionAndOrientation>();
 				foreach (MyCubeGrid grid in PlaceGrids)
 				{
@@ -825,61 +818,74 @@ namespace GridStorage
 						return;
 
 					MyAPIGateway.Entities.CreateFromObjectBuilderParallel(gridBuilder, false, (e) => {
-						MyCubeGrid g = e as MyCubeGrid;
-
-						if (g != null)
+						try
 						{
-							lock (cubeGrids)
+							if (token.IsCancelRequested)
+								return;
+
+							MyCubeGrid g = e as MyCubeGrid;
+
+							if (g != null)
 							{
-								cubeGrids.Add(g);
+								lock (cubeGrids)
+								{
+									cubeGrids.Add(g);
+								}
+
+								if (cubeGrids.Count == grids.Count)
+								{
+									MyCubeGrid parent = cubeGrids[0];
+									BoundingBoxD parentBoundingBox = parent.PositionComp.WorldAABB;
+									BoundingBoxD groupBoundingBox = new BoundingBoxD(parentBoundingBox.Min, parentBoundingBox.Max);
+
+									foreach (MyCubeGrid grid in cubeGrids)
+									{
+										grid.IsPreview = true;
+										grid.SyncFlag = false;
+										grid.Save = false;
+										grid.Flags |= EntityFlags.IsNotGamePrunningStructureObject;
+										grid.Render.CastShadows = false;
+
+										groupBoundingBox.Include(grid.PositionComp.WorldAABB);
+									}
+
+									ApplyHologramScaleAndOffset(CubeBlock.CubeGrid.GridSize, groupBoundingBox.Size.Max());
+									Vector3D holoOrigin = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset);
+
+									if (token.IsCancelRequested)
+										return;
+
+									foreach (var grid in cubeGrids)
+									{
+										MatrixD matrix = grid.WorldMatrix;
+
+										Vector3D offset = groupBoundingBox.Center - matrix.Translation;
+										Vector3D scaledOffset = offset * HologramScale;
+
+										matrix.Translation = holoOrigin - scaledOffset;
+
+										grid.WorldMatrix = matrix;
+										grid.PositionComp.Scale = HologramScale;
+
+										MyAPIGateway.Entities.AddEntity(grid);
+
+									}
+
+									foreach (MyCubeGrid cg in HoloGrids)
+									{
+										MyAPIGateway.Entities.MarkForClose(cg);
+									}
+
+									HoloGrids = cubeGrids;
+									CancelHoloGridJob = null;
+								}
 							}
-
-							if (cubeGrids.Count == grids.Count)
+						}
+						catch(Exception exception)
+						{
+							foreach (MyCubeGrid cg in cubeGrids)
 							{
-								MyCubeGrid parent = cubeGrids[0];
-								BoundingBoxD parentBoundingBox = parent.PositionComp.WorldAABB;
-								BoundingBoxD groupBoundingBox = new BoundingBoxD(parentBoundingBox.Min, parentBoundingBox.Max);
-
-								foreach (MyCubeGrid grid in cubeGrids)
-								{
-									grid.IsPreview = true;
-									grid.SyncFlag = false;
-									grid.Save = false;
-									grid.Flags |= EntityFlags.IsNotGamePrunningStructureObject;
-									grid.Render.CastShadows = false;
-
-									groupBoundingBox.Include(grid.PositionComp.WorldAABB);
-								}
-
-								ApplyHologramScaleAndOffset(CubeBlock.CubeGrid.GridSize, groupBoundingBox.Size.Max());
-								Vector3D holoOrigin = CubeBlock.PositionComp.WorldAABB.Center + (CubeBlock.WorldMatrix.Up * HologramOffset);
-
-								if (token.IsCancelRequested)
-									return;
-
-								foreach (var grid in cubeGrids)
-								{
-									MatrixD matrix = grid.WorldMatrix;
-
-									Vector3D offset = groupBoundingBox.Center - matrix.Translation;
-									Vector3D scaledOffset = offset * HologramScale;
-
-									matrix.Translation = holoOrigin - scaledOffset;
-
-									grid.WorldMatrix = matrix;
-									grid.PositionComp.Scale = HologramScale;
-
-									MyAPIGateway.Entities.AddEntity(grid);
-
-								}
-
-								foreach (MyCubeGrid cg in HoloGrids)
-								{
-									MyAPIGateway.Entities.MarkForClose(cg);
-								}
-
-								HoloGrids = cubeGrids;
-								CancelHoloGridJob = null;
+								MyAPIGateway.Entities.MarkForClose(cg);
 							}
 						}
 					});
@@ -1342,6 +1348,11 @@ namespace GridStorage
 
 			GridNames.Push();
 
+			if (SelectedGridIndex.Value >= GridList.Count)
+			{
+				SelectedGridIndex.Value = -1;
+			}
+
 			List<IMyTerminalControl> controls = new List<IMyTerminalControl>();
 			MyAPIGateway.TerminalControls.GetControls<IMyUpgradeModule>(out controls);
 
@@ -1349,7 +1360,6 @@ namespace GridStorage
 			{
 				control.UpdateVisual();
 			}
-
 		}
 
 		public static bool GridHasNonFactionOwners(IMyCubeGrid grid)

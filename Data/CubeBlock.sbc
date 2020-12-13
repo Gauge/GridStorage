@@ -1,50 +1,65 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <BlockVariantGroups>  
+    <BlockVariantGroup>
+      <Id Type="MyObjectBuilder_BlockVariantGroup" Subtype="GridGarageGauge" />
+      <Icon>Textures\GUI\Icons\Cubes\SoundBlock.dds</Icon>
+      <DisplayName>DisplayName_Block_GridGarage</DisplayName>
+      <Description>Store your grids in this garage</Description>
+      <Blocks>
+        <Block Type="MyObjectBuilder_UpgradeModule" Subtype="GridStorageBlock" />
+      </Blocks>
+    </BlockVariantGroup>
+  </BlockVariantGroups>
+  <ResearchBlocks>
+    <ResearchBlock xsi:type="ResearchBlock">
+      <Id Type="MyObjectBuilder_UpgradeModule" Subtype="GridStorageBlock" />
+      <UnlockedByGroups>
+        <GroupSubtype>3</GroupSubtype>
+      </UnlockedByGroups>
+    </ResearchBlock>
+  </ResearchBlocks>
+
+
   <CubeBlocks>
-    <Definition xsi:type="MyObjectBuilder_UpgradeModuleDefinition">
+        <Definition xsi:type="MyObjectBuilder_UpgradeModuleDefinition">
       <Id>
         <TypeId>UpgradeModule</TypeId>
         <SubtypeId>GridStorageBlock</SubtypeId>
       </Id>
       <DisplayName>Grid Garage</DisplayName>
       <Icon>Textures\GUI\Icons\GarageBlock.dds</Icon>
-      <Description>Stores and respawns grids</Description>
+      <Description>Stores and Respawns grids</Description>
       <CubeSize>Large</CubeSize>
       <BlockTopology>TriangleMesh</BlockTopology>
       <Size x="1" y="1" z="1" />
       <ModelOffset x="0" y="0" z="0" />
       <Model>Models\Cubes\GarageStorage.mwm</Model>
       <Components>
-        <Component Subtype="SteelPlate" Count="11" />
-        <Component Subtype="Construction" Count="4" />
-        <Component Subtype="Computer" Count="2" />
-        <Component Subtype="LargeTube" Count="2" />
-        <Component Subtype="Motor" Count="1" />
-        <Component Subtype="SteelPlate" Count="20" />
+        <Component Subtype="SteelPlate" Count="31" />
+        <Component Subtype="Construction" Count="30" />
+        <Component Subtype="LargeTube" Count="4" />
+        <Component Subtype="Motor" Count="2" />
+        <Component Subtype="Computer" Count="20" />
+        <Component Subtype="SteelPlate" Count="10" />
       </Components>
       <CriticalComponent Subtype="Computer" Index="0" />
       <MountPoints>
-        <MountPoint Side="Bottom" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" Default="true" />
-        <MountPoint Side="Back" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
-        <MountPoint Side="Front" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
-        <MountPoint Side="Left" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
-        <MountPoint Side="Right" StartX="0.33" StartY="0.33" EndX="0.66" EndY="0.66" />
+        <MountPoint Side="Bottom" StartX="00" StartY="00" EndX="1" EndY="1" Default="true" />
+        <MountPoint Side="Back" StartX="0.1" StartY="0.0" EndX="0.9" EndY="0.3" />
+        <MountPoint Side="Front" StartX="0.1" StartY="0.0" EndX="0.9" EndY="0.3" />
+        <MountPoint Side="Left" StartX="0.1" StartY="0.0" EndX="0.9" EndY="0.3" />
+        <MountPoint Side="Right" StartX="0.1" StartY="0.0" EndX="0.9" EndY="0.3" />
       </MountPoints>
       <BuildProgressModels>
         <Model BuildPercentUpperBound="0.33" File="Models\Cubes\GarageStorage_Constr1.mwm" />
       </BuildProgressModels>
       <BlockPairName>GridGarage</BlockPairName>
-      <BuildTimeSeconds>40</BuildTimeSeconds>
+      <BuildTimeSeconds>20</BuildTimeSeconds>
       <MirroringX>Z</MirroringX>
       <MirroringZ>X</MirroringZ>
       <EdgeType>Light</EdgeType>
-	  <ScreenAreas>
-        <ScreenArea Name="CockpitScreen_01" DisplayName="DisplayName_Screen_Large" TextureResolution="256" ScreenWidth="16" ScreenHeight="11" />
-        <ScreenArea Name="CockpitScreen_02" DisplayName="DisplayName_Screen_ProjectionArea" TextureResolution="512" ScreenWidth="2" ScreenHeight="1" />
-        <ScreenArea Name="CockpitScreen_03" DisplayName="DisplayName_Screen_Large" TextureResolution="256" ScreenWidth="16" ScreenHeight="11" />
-        <ScreenArea Name="CockpitScreen_04" DisplayName="DisplayName_Screen_ProjectionArea" TextureResolution="512" ScreenWidth="2" ScreenHeight="1" />
-      </ScreenAreas>
-      <PCU>50</PCU>  
+      <PCU>100</PCU>  
       <PrimarySound>BlockModuleProductivity</PrimarySound>
       <DamageEffectName>Damage_Electrical_Damaged</DamageEffectName>
       <DamagedSound>ParticleElectrical</DamagedSound>
@@ -54,4 +69,31 @@
       <IsAirTight>false</IsAirTight>
     </Definition>
   </CubeBlocks>
+  <CategoryClasses>
+    <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
+      <Id>
+        <TypeId>GuiBlockCategoryDefinition</TypeId>
+        <SubtypeId/>
+      </Id>
+      <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
+      <Name>LargeBlocks</Name>
+      <StrictSearch>true</StrictSearch>
+      <ItemIds>
+        <string>GridStorageBlock</string>
+      </ItemIds>
+    </Category>
+  </CategoryClasses>
+
+	<BlockPositions>
+		<BlockPosition>
+			<Name>GridGarage</Name>
+			<Position>
+				<X>6</X>
+				<Y>8</Y>
+			</Position>
+		</BlockPosition>
+	</BlockPositions>
+
+
+
 </Definitions>
