@@ -363,11 +363,11 @@ namespace GridStorage
 
 					if (dummy.Name == "detector_terminal_1" || dummy.Name == "detector_terminal_3")
 					{
-						SelectedGridIndex.Value = IntWrap(SelectedGridIndex.Value, -1, GridNames.Value.Count);
+						SelectedGridIndex.Value = IndexWrap(SelectedGridIndex.Value, -1, GridNames.Value.Count);
 					}
 					else if (dummy.Name == "detector_terminal_2" || dummy.Name == "detector_terminal_4")
 					{
-						SelectedGridIndex.Value = IntWrap(SelectedGridIndex.Value, 1, GridNames.Value.Count);
+						SelectedGridIndex.Value = IndexWrap(SelectedGridIndex.Value, 1, GridNames.Value.Count);
 					}
 					else if (dummy.Name == "detector_terminal_5" || dummy.Name == "detector_terminal_6")
 					{
@@ -376,14 +376,17 @@ namespace GridStorage
 				}
 
 				TerminalButtonPressed = isUsePressed;
-				MyAPIGateway.Utilities.ShowNotification($"Index: {SelectedGridIndex.Value}, Name: {(SelectedGridIndex.Value == -1 ? "N/A" : (HologramPrefab.Value.Name == string.Empty ? "LOADING..." : HologramPrefab.Value.Name))}", 1, "white");
+				//MyAPIGateway.Utilities.ShowNotification($"Index: {SelectedGridIndex.Value}, Name: {(SelectedGridIndex.Value == -1 ? "N/A" : (HologramPrefab.Value.Name == string.Empty ? "LOADING..." : HologramPrefab.Value.Name))}", 1, "white");
 			}
 		}
 
-		private int IntWrap(int current, int increment, int maxCount)
+		private int IndexWrap(int current, int increment, int maxCount)
 		{
-			if (Math.Abs(increment) >= maxCount)
-				return -1;
+			if (maxCount == 1)
+				return 0;
+
+			//if (Math.Abs(increment) > maxCount)
+			//	return -1;
 
 			int newValue = current + increment;
 			if (newValue >= maxCount)
@@ -422,11 +425,14 @@ namespace GridStorage
 			{
 				bool isValid = true;
 
-				if ((DateTime.UtcNow - StorageCooldown.Value).TotalSeconds < Core.Config.StorageCooldown)
+				double secondsSinceLastStorage = (DateTime.UtcNow - StorageCooldown.Value).TotalSeconds;
+				if (secondsSinceLastStorage < Core.Config.StorageCooldown)
 				{
 					GridSelectErrorMessage = $"Storage is on Cooldown: {(Core.Config.StorageCooldown - ((DateTime.UtcNow - StorageCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds";
 					isValid = false;
 				}
+
+
 
 				if (SelectedGridEntity != hitGrid)
 				{
@@ -484,7 +490,7 @@ namespace GridStorage
 					MyAPIGateway.Utilities.ShowNotification(GridSelectErrorMessage, 1, "Red");
 
 				}
-				else if (buttons.Contains(MyMouseButtonsEnum.Left))
+				else if (buttons.Contains(MyMouseButtonsEnum.Left) && secondsSinceLastStorage > 0.25d)
 				{
 					if (MyAPIGateway.Multiplayer.IsServer)
 					{
@@ -611,7 +617,8 @@ namespace GridStorage
 			// validate grid placement position
 			bool isValid = true;
 
-			if ((DateTime.UtcNow - SpawnCooldown.Value).TotalSeconds < Core.Config.SpawnCooldown)
+			double secondsSinceLastSpawn = (DateTime.UtcNow - SpawnCooldown.Value).TotalSeconds;
+			if (secondsSinceLastSpawn < Core.Config.SpawnCooldown)
 			{
 				MyAPIGateway.Utilities.ShowNotification($"Spawn is on Cooldown: {(Core.Config.SpawnCooldown - ((DateTime.UtcNow - SpawnCooldown.Value).TotalMilliseconds / 1000)).ToString("n2")} seconds", 1, "Red");
 				isValid = false;
@@ -739,7 +746,7 @@ namespace GridStorage
 
 
 			// place grid
-			if (isValid && buttons.Contains(MyMouseButtonsEnum.Left))
+			if (isValid && buttons.Contains(MyMouseButtonsEnum.Left) && secondsSinceLastSpawn > 1d)
 			{
 				if (PlaceGrids != null)
 				{

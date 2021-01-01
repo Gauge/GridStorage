@@ -7,8 +7,6 @@ using VRage.Utils;
 
 namespace GridStorage
 {
-	public enum NetworkCommands { BlockPropertiesUpdate };
-
 	[MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
 	public class Core : MySessionComponentBase
 	{
