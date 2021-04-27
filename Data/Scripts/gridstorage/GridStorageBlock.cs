@@ -161,6 +161,7 @@ namespace GridStorage
 		/// </summary>
 		public override bool IsSerialized()
 		{
+			DisplayHologram.Value = false;
 			Save();
 			return base.IsSerialized();
 		}
@@ -1317,6 +1318,8 @@ namespace GridStorage
 					{
 						raw[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
 					}
+
+					MyLog.Default.Info($"[Grid Garage] Loading data... Stored string size: {hex}, raw bytes: {raw.Length}");
 
 					try
 					{
